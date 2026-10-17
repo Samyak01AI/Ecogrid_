@@ -1,0 +1,54 @@
+
+.study-setup { margin: 0 0 24px; padding: 19px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
+.study-setup-head { margin-bottom: 15px; }
+.study-setup-head h2 { margin: 6px 0; font-size: 17px; font-weight: 580; letter-spacing: -.4px; }
+.study-setup-head p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.study-setup-layout { display: grid; grid-template-columns: minmax(280px, .82fr) minmax(0, 1.18fr); align-items: start; gap: 14px; }
+.study-setup-controls { display: grid; gap: 10px; min-width: 0; }
+.study-setup-card { position: relative; padding: 12px; border: 1px solid var(--border-soft); border-radius: 7px; background: var(--surface-2); }
+.setup-field { display: flex; min-width: 0; flex-direction: column; gap: 5px; color: var(--muted); font: 7px 'JetBrains Mono', monospace; letter-spacing: .6px; }
+.setup-field input { width: 100%; min-width: 0; min-height: 31px; padding: 6px 8px; color: var(--text); border: 1px solid var(--border); border-radius: 4px; outline: 0; background: var(--surface); font: 10px 'Inter', sans-serif; letter-spacing: 0; }
+.setup-field input:focus { border-color: var(--accent); }
+.setup-field input[type='number'] { font-family: 'JetBrains Mono', monospace; }
+.setup-name-field { margin-bottom: 10px; }
+.place-search-form { margin: 0; }
+.setup-search-input { display: flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 7px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); }
+.setup-search-input > svg { flex: 0 0 auto; color: var(--muted); }
+.setup-search-input input { min-width: 0; flex: 1; padding: 7px 0; color: var(--text); border: 0; outline: 0; background: transparent; font: 9px 'Inter', sans-serif; }
+.setup-search-input button { flex: 0 0 auto; padding: 6px 8px; color: #062118; border: 0; border-radius: 3px; background: var(--accent); font-size: 8px; font-weight: 650; }
+.setup-search-input button:disabled { opacity: .55; }
+.setup-attribution, .boundary-note, .setup-preview-caption, .scenario-empty-note { margin: 8px 0 0; color: var(--muted); font-size: 8px; line-height: 1.55; }
+.setup-attribution a, .setup-permission-note a { color: var(--mint); text-decoration: underline; text-underline-offset: 2px; }
+.place-result-list { position: absolute; z-index: 800; top: 105px; left: 12px; right: 12px; padding: 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); box-shadow: var(--shadow); }
+.place-result-list button { display: grid; width: 100%; grid-template-columns: 14px minmax(0,1fr); align-items: center; gap: 6px; padding: 7px; color: var(--text-secondary); text-align: left; border: 0; border-radius: 4px; background: transparent; }
+.place-result-list button:hover { background: var(--surface-3); }
+.place-result-list button > svg { color: var(--accent); }
+.place-result-list button span { overflow: hidden; font-size: 8px; line-height: 1.4; text-overflow: ellipsis; }
+.place-result-list button small { grid-column: 2; color: var(--muted); font: 7px 'JetBrains Mono', monospace; }
+.setup-card-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--accent); }
+.setup-card-heading > div { display: flex; flex-direction: column; gap: 3px; }
+.setup-card-heading b { color: var(--text-secondary); font-size: 9px; font-weight: 620; }
+.setup-card-heading small { color: var(--muted); font-size: 7px; line-height: 1.4; }
+.boundary-file-input { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; padding: 6px 8px; color: var(--text-secondary); border: 1px dashed var(--border); border-radius: 4px; background: var(--surface); cursor: pointer; font-size: 8px; }
+.boundary-file-input input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.boundary-file-input:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.boundary-file-input small { flex: 0 0 auto; color: var(--muted); font: 7px 'JetBrains Mono', monospace; }
+.boundary-note { padding-left: 8px; border-left: 2px solid #e1b25c; }
+.setup-grid-fields { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+.setup-origin-fields { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin-top: 9px; }
+.setup-create-button { width: 100%; margin-top: 11px; }
+.setup-permission-note { display: flex; align-items: flex-start; gap: 5px; margin: 8px 0 0; color: var(--muted); font-size: 8px; line-height: 1.45; }
+.setup-permission-note svg { flex: 0 0 auto; margin-top: 1px; }
+.study-setup-preview { min-width: 0; padding: 9px; border: 1px solid var(--border-soft); border-radius: 7px; background: color-mix(in srgb, var(--surface-2) 68%, transparent); }
+.setup-preview-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin: 1px 2px 8px; }
+.setup-preview-heading > span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.setup-preview-heading > span > b { overflow: hidden; color: var(--text); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.setup-preview-heading > small { flex: 0 0 auto; color: var(--muted); font: 7px 'JetBrains Mono', monospace; }
+.setup-map-preview .map-shell { border-radius: 6px; box-shadow: none; }
+.setup-map-preview .map-canvas { height: clamp(350px, 49vh, 520px); min-height: 350px; }
+.setup-map-preview .map-top-controls { gap: 4px; }
+.study-origin-marker { display: grid; place-items: center; border: 2px solid #e8fff0; border-radius: 50%; background: #1f8a70; box-shadow: 0 0 0 4px rgba(76,195,138,.27), 0 5px 12px rgba(0,0,0,.4); cursor: grab; }
+.study-origin-marker span { width: 6px; height: 6px; border-radius: 50%; background: #dcffe8; }
+.study-origin-marker:active { cursor: grabbing; }
+@media (max-width: 1100px) { .study-setup-layout { grid-template-columns: minmax(0,1fr); } .study-setup-preview { order: -1; } .setup-map-preview .map-canvas { height: min(55vh, 460px); } }
+@media (max-width: 640px) { .study-setup { padding: 11px; } .study-setup-layout { gap: 9px; } .setup-map-preview .map-canvas { height: 370px; min-height: 370px; } .setup-preview-heading { align-items: flex-start; flex-direction: column; } .place-result-list { top: 105px; } }

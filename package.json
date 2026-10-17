@@ -1,0 +1,36 @@
+{
+  "name": "ecogrid-ai",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.25.0",
+  "engines": { "node": ">=22.0.0" },
+  "scripts": {
+    "build:packages": "pnpm --filter @ecogrid/domain build && pnpm --filter @ecogrid/contracts build",
+    "db:generate": "pnpm --filter @ecogrid/api db:generate",
+    "dev": "pnpm run build:packages && pnpm run db:generate && concurrently -k -n API,WEB -c green,cyan \"pnpm --filter @ecogrid/api dev\" \"pnpm --filter @ecogrid/web dev\"",
+    "build": "pnpm run build:packages && pnpm run db:generate && pnpm --filter @ecogrid/api build && pnpm --filter @ecogrid/web build",
+    "typecheck": "pnpm run build:packages && pnpm run db:generate && pnpm --filter @ecogrid/api typecheck && pnpm --filter @ecogrid/web typecheck",
+    "lint": "pnpm -r --if-present lint",
+    "test": "pnpm --filter @ecogrid/domain test && pnpm --filter @ecogrid/api test",
+    "e2e": "playwright test",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
+    "db:migrate:postgres": "pnpm --filter @ecogrid/api exec prisma migrate deploy --schema prisma/postgres/schema.prisma",
+    "db:migrate:mysql": "pnpm --filter @ecogrid/api exec prisma migrate deploy --schema prisma/mysql/schema.prisma",
+    "db:seed": "pnpm --filter @ecogrid/api seed"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.51.0",
+    "@types/node": "22.13.10",
+    "@typescript-eslint/eslint-plugin": "8.26.0",
+    "@typescript-eslint/parser": "8.26.0",
+    "concurrently": "9.1.2",
+    "eslint": "9.22.0",
+    "eslint-plugin-react-hooks": "5.2.0",
+    "eslint-plugin-react-refresh": "0.2.0",
+    "globals": "16.0.0",
+    "typescript": "5.8.2",
+    "typescript-eslint": "8.26.0",
+    "vitest": "3.0.8"
+  }
+}

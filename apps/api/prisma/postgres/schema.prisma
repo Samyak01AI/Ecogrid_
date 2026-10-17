@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/postgres"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model StudyArea {
+  id          String     @id
+  name        String     @db.VarChar(120)
+  originLat   Float
+  originLng   Float
+  rows        Int
+  columns     Int
+  cellSizeLat Float
+  cellSizeLng Float
+  rotation    Float      @default(0)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  cells       Cell[]
+  scenarios   Scenario[]
+}
+
+model Cell {
+  id                 String    @id
+  studyAreaId        String
+  row                Int
+  col                Int
+  centerLat          Float
+  centerLng          Float
+  polygonJson        String    @db.Text
+  areaName           String    @db.VarChar(120)
+  landUse            String    @db.VarChar(40)
+  surfaceType        String    @db.VarChar(40)
+  heat               Float
+  vegetation         Float
+  pedestrian         Float
+  connectivity       Float
+  feasibility        Float
+  existingGreenCover Float
+  priorityZone       Boolean   @default(false)
+  dataConfidence     Float
+  capacity           Int
+  studyArea          StudyArea @relation(fields: [studyAreaId], references: [id], onDelete: Cascade)
+
+  @@unique([studyAreaId, row, col])
+  @@index([studyAreaId, areaName])
+}
+
+model Scenario {
+  id          String    @id @default(cuid())
+  studyAreaId String
+  name        String    @db.VarChar(100)
+  description String?   @db.VarChar(600)
+  budget      Float
+  weightsJson String    @db.VarChar(512)
+  enabledInterventionsJson String @db.Text
+  planJson    String?   @db.Text
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  studyArea   StudyArea @relation(fields: [studyAreaId], references: [id], onDelete: Cascade)
+
+  @@index([studyAreaId, createdAt])
+}
+
+model User {
+  id           String           @id @default(cuid())
+  email        String           @unique @db.VarChar(254)
+  passwordHash String           @db.VarChar(255)
+  role         String           @default("viewer") @db.VarChar(20)
+  createdAt    DateTime         @default(now())
+  refresh      RefreshSession[]
+}
+
+model RefreshSession {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique @db.VarChar(128)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}

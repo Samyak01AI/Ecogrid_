@@ -1,0 +1,61 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ecogrid
+      POSTGRES_USER: ecogrid
+      POSTGRES_PASSWORD: ecogrid
+    ports:
+      - "5432:5432"
+    volumes:
+      - ecogrid-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ecogrid -d ecogrid"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sh -c "pnpm run db:migrate:postgres && pnpm run db:seed && pnpm --filter @ecogrid/api dev"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      DATABASE_PROVIDER: postgres
+      DATABASE_URL: postgresql://ecogrid:ecogrid@db:5432/ecogrid?schema=public
+      API_PORT: 3001
+      PUBLIC_HTTPS: "false"
+      WEB_ORIGIN: http://localhost:3000
+    ports:
+      - "3001:3001"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  model:
+    build:
+      context: ./model-service
+    profiles: ["model"]
+    environment:
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: pnpm --filter @ecogrid/web dev --host 0.0.0.0 --port 3000
+    environment:
+      NODE_ENV: development
+      VITE_API_PROXY_TARGET: http://api:3001
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  ecogrid-postgres:
