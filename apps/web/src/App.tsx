@@ -667,6 +667,13 @@ function CellInspector({ cell, comparison, studyId, plan, onClose, onPlan }: { c
     cost?: number;
     suitabilityScore?: number;
     reasons?: string[];
+    categoryBenefit?: {
+      heat?: number;
+      vegetation?: number;
+      pedestrian?: number;
+      connectivity?: number;
+      biodiversity?: number;
+    };
   };
   type InspectorRejected = {
     candidate?: { cellId?: string };
@@ -971,23 +978,26 @@ function CellInspector({ cell, comparison, studyId, plan, onClose, onPlan }: { c
             </div>
 
             {/* Top AI CV Recommendation */}
-            {cvData.recommendations?.[0] && (
-              <div className="cv-rec-box">
-                <div className="cv-rec-title">
-                  <WandSparkles size={11} /> {cvData.recommendations[0].title}
+            {cvData.recommendations?.[0] && (() => {
+              const topRec = cvData.recommendations[0];
+              return (
+                <div className="cv-rec-box">
+                  <div className="cv-rec-title">
+                    <WandSparkles size={11} /> {topRec.title}
+                  </div>
+                  <p style={{ margin: 0, color: 'var(--muted)', fontSize: '7.5px', lineHeight: 1.4 }}>
+                    {topRec.reason}
+                  </p>
+                  <button
+                    type="button"
+                    className="cv-rec-btn"
+                    onClick={() => applyCvRecommendation(topRec.type)}
+                  >
+                    <Sprout size={11} /> Apply to What-If
+                  </button>
                 </div>
-                <p style={{ margin: 0, color: 'var(--muted)', fontSize: '7.5px', lineHeight: 1.4 }}>
-                  {cvData.recommendations[0].reason}
-                </p>
-                <button
-                  type="button"
-                  className="cv-rec-btn"
-                  onClick={() => applyCvRecommendation(cvData.recommendations[0].type)}
-                >
-                  <Sprout size={11} /> Apply to What-If
-                </button>
-              </div>
-            )}
+              );
+            })()}
           </>
         )}
       </div>
