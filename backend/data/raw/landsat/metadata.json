@@ -1,0 +1,15 @@
+{
+  "source": "USGS / NASA Landsat 8/9 Collection 2 Tier 1",
+  "product": "Surface Temperature (ST) Level-2",
+  "sensor": "TIRS (Thermal Infrared Sensor) Band 10",
+  "wavelength": "10.6 - 11.19 µm",
+  "spatial_resolution": "30m resampled (100m native thermal)",
+  "calibration_constants": {
+    "scale_factor": 0.00341802,
+    "add_offset": 149.0,
+    "k1_constant": 774.8853,
+    "k2_constant": 1321.0789
+  },
+  "unit": "Degrees Celsius (LST)",
+  "ingestion_status": "CALIBRATED_FOR_ZONAL_EXTRACTION"
+}

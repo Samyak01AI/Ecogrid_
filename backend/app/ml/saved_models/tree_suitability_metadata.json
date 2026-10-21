@@ -1,0 +1,33 @@
+{
+  "model_name": "EcoGrid Tree-Site Suitability Predictor",
+  "model_version": "2.1.0-spatial-calibrated",
+  "champion_algorithm": "xgboost",
+  "pipeline_stages": [
+    "SimpleImputer(median)",
+    "StandardScaler",
+    "CalibratedClassifierCV(xgboost)"
+  ],
+  "feature_schema": [
+    "heat_score",
+    "vegetation_deficit",
+    "built_surface_ratio",
+    "available_area",
+    "green_space_ratio",
+    "feasibility_score",
+    "distance_to_infrastructure_m",
+    "distance_to_green_m"
+  ],
+  "metrics": {
+    "name": "XGBoost Calibrated Pipeline",
+    "accuracy": 0.95,
+    "f1_score": 0.9497,
+    "precision": 0.9511,
+    "recall": 0.9409,
+    "balanced_accuracy": 0.9494,
+    "brier_score": 0.0453,
+    "spatial_cv_macro_f1": "0.9397 \u00b1 0.0068",
+    "train_time_ms": 1293.87
+  },
+  "spatial_validation": "3-Fold GroupKFold Spatial Cross-Validation + Independent Spatial Block Holdout",
+  "hard_constraint_enforcement": "CRITICAL: A high predicted suitability score must never override a mandatory safety or legal restriction. Safety filters (underground utilities, vehicular sightlines, structural envelopes) strictly override ML."
+}

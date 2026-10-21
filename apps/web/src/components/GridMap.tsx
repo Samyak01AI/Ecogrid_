@@ -453,7 +453,7 @@ export default function GridMap({ cells, selectedCell, selectedCells, onSelectCe
       {!compact && <div className="map-opacity-control"><label htmlFor="grid-opacity">GRID OPACITY <b>{Math.round(opacity * 100)}%</b></label><input id="grid-opacity" aria-label="Grid opacity" type="range" min="0.2" max="0.82" step="0.02" value={opacity} onChange={(event) => onOpacityChange(Number(event.currentTarget.value))} /></div>}
       <div className="map-attribution-note" dangerouslySetInnerHTML={{ __html: activeLayer.attribution }} />
     </div>
-    {!compact && plan && <div className="map-plan-summary"><span><i className="plan-marker-dot" />{plan.cellsImproved} cells actioned</span><span>${plan.totalCost.toLocaleString()} deployed</span><span>{plan.selected.length} interventions</span></div>}
+    {!compact && plan && <div className="map-plan-summary"><span><i className="plan-marker-dot" />{plan.cellsImproved} cells actioned</span><span>₹{plan.totalCost.toLocaleString('en-IN')} deployed</span><span>{plan.selected.length} interventions</span></div>}
   </section>;
 }
 

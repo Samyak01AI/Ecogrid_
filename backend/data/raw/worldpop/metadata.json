@@ -1,0 +1,8 @@
+{
+  "source": "WorldPop / University of Southampton",
+  "product": "Global High Resolution Population Denominators",
+  "spatial_resolution": "100m (approx 3 arc-seconds)",
+  "metrics": "Estimated human count per grid cell / hectare",
+  "usage": "Pedestrian and community climate vulnerability exposure index",
+  "ingestion_status": "READY_FOR_AGGREGATION"
+}

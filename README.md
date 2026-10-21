@@ -1,51 +1,115 @@
 # EcoGrid AI 2.0
 
-**EcoGrid AI** is a climate-planning workbench for turning a study-area grid into a budget-constrained, explainable set of urban heat and green-infrastructure interventions. It renders one clickable Leaflet polygon per analysis cell and includes deterministic demo scores, optimizer and connectivity workflows, what-if simulation, scenarios, analytics, report exports, and API contracts.
+**EcoGrid AI** is an urban climate-decision workbench and green-infrastructure planning platform. It transforms study-area grids (e.g. the default 10×10 Bengaluru East campus) into budget-constrained, explainable, and multi-objective climate intervention plans targeting urban heat reduction, vegetation deficit recovery, pedestrian comfort, and ecological corridor connectivity.
 
 > The default Bengaluru East campus scores and named zones are deterministic illustrative planning inputs, not field measurements or engineering advice.
 
+---
+
 ## Architecture
 
+EcoGrid AI features a hybrid architecture combining a high-performance **React 18 Leaflet frontend**, a **Fastify TypeScript API** for authentication, persistence, and reporting, a pure **TypeScript domain engine**, and a high-performance **Python FastAPI service** powering GIS ingestion, machine learning, multi-objective Pareto optimization, and satellite ground-truth monitoring.
+
 ```mermaid
-flowchart LR
-  Browser[React 18 + Vite + Leaflet] -->|same-origin /api| API[Fastify + TypeScript]
-  API --> Domain[Domain optimizer / grid / connectivity]
-  API --> Contracts[Zod request contracts]
-  API --> DB[(Prisma database)]
-  DB -. local .-> PG[(PostgreSQL)]
-  DB -. hosted .-> MySQL[(Managed MySQL-compatible database)]
-  Browser --> OSM[OpenStreetMap / Esri tiles]
+flowchart TB
+  subgraph Frontend["Frontend (apps/web)"]
+    UI["React 18 + Vite + Tailwind"]
+    Map["Leaflet (1 Polygon/Cell) + Recharts"]
+  end
+
+  subgraph Gateway["API Layer"]
+    Fastify["Fastify TypeScript API (apps/api)"]
+    FastAPI["FastAPI Python Engine (backend/app)"]
+  end
+
+  subgraph Optimization["Solvers & ML"]
+    CPSAT["Google OR-Tools CP-SAT (Single-Objective)"]
+    NSGA2["pymoo NSGA-II (Multi-Objective Pareto)"]
+    XGB["XGBoost / Random Forest (Suitability)"]
+    Reg["Microclimate Regressor (Delta T °C)"]
+    Domain["Domain Deterministic Optimizer"]
+  end
+
+  subgraph DataGIS["GIS & Ingestion"]
+    Bhuvan["ISRO Bhuvan LULC (EPSG:32643)"]
+    Landsat["Landsat 8/9 LST Band 10"]
+    Sentinel["Sentinel-2 MSI NDVI"]
+    WorldPop["WorldPop & GBIF Biodiversity"]
+  end
+
+  subgraph Storage["Persistence & Governance"]
+    Prisma[(Prisma ORM: Postgres / MySQL)]
+    SQLA[(SQLAlchemy / PostGIS / SQLite)]
+    Audit["Audit Trail & Human Approval"]
+  end
+
+  UI -->|/api| Fastify
+  UI -->|/api| FastAPI
+  Fastify --> Domain
+  Fastify --> Prisma
+  FastAPI --> CPSAT
+  FastAPI --> NSGA2
+  FastAPI --> XGB
+  FastAPI --> Reg
+  FastAPI --> DataGIS
+  FastAPI --> SQLA
+  FastAPI --> Audit
+  Map --> OSM["OSM / Esri Satellite Tiles"]
 ```
 
-- **`apps/web`** — React, Vite, Tailwind, React Router, TanStack Query, Recharts, Lucide, Leaflet 1 polygon per cell. The map and charts load as separate chunks.
-- **`apps/api`** — Fastify JSON API, session cookies, role checks, rate limiting, OpenAPI docs, exports and PDF reports.
-- **`packages/domain`** — shared strict models, seeded grid, need-weighted greedy optimizer, what-if scoring and graph connectivity analysis.
-- **`packages/contracts`** — shared Zod schemas for API inputs.
-- **`apps/api/prisma/postgres` and `apps/api/prisma/mysql`** — provider-specific schema and additive migration trees. The data model stays aligned; local Compose uses PostgreSQL, while the hosted demo uses the managed MySQL-compatible `DATABASE_URL` supplied by the host.
+### Component Breakdown
 
-## Quick start: Docker
+- **`apps/web`** — React 18, Vite, Tailwind CSS, React Router, TanStack Query, Recharts, Lucide icons, Leaflet / react-leaflet v4. Renders exactly one clickable polygon per cell on a dedicated map pane; includes Dark Eco-Tech (`#071A17`) and Light themes, Pareto trade-off explorer modal, human-in-the-loop approval actions, ML suitability inspection drawer, provenance badges, and live KPI dashboards.
+- **`backend`** — Python 3.12+ FastAPI application implementing the complete Geospatial AI & Intelligent Optimization Engine:
+  - **Land-Cover Classification Model (v2.1.0)**: Scikit-Learn `RandomForestClassifier` pipeline (`SimpleImputer` + `StandardScaler` + `RandomForestClassifier`) & `XGBClassifier` comparison trained on Sentinel-2 MSI surface reflectance (B2, B3, B4, B8) and spectral indices (NDVI, NDWI, NDBI) with 94.7% test accuracy, 0.947 Macro-F1, and out-of-distribution input validation.
+  - **Tree-Site Suitability Predictor & Hard Safety Gating (v2.1.0)**: Champion calibrated pipeline (`SimpleImputer` + `StandardScaler` + `CalibratedClassifierCV`) evaluated with **3-Fold GroupKFold Spatial Cross-Validation** and an independent **spatial holdout block** (Block 3: 400 samples) achieving 95.0% accuracy, 0.9497 Macro-F1, and 0.0453 Brier score. **Crucially enforces hard safety constraints**: high predicted suitability NEVER overrides underground utility buffers (< 3.0m), road setbacks (< 2.5m), or building structural envelopes.
+  - **Microclimate Impact Regressor**: Gradient Boosting regressor pipeline predicting localized temperature drops ($\Delta T$ in °C; holdout MAE: 0.155 °C, RMSE: 0.194 °C) from planting volume, permeable area, and baseline heat.
+  - **Explainable Decision Pipeline**: Connects ML suitability and spectral classification into environmental scoring and candidate interventions, exposing **WHAT → WHERE → HOW MUCH → WHY → COST → EXPECTED IMPACT** with complete data provenance and decision rationale.
+  - **Computer Vision Satellite Segmentation**: 0.58m/px semantic segmentation of high-resolution aerial tiles (Esri World Imagery) classifying impervious pavement, mature tree canopy, permeable grass, rooftops, and water bodies.
+  - **NetworkX Green Connectivity Analysis**: Graph percolation modeling nodes as green spaces and edges as spatial adjacency, identifying corridor bottleneck cells.
+  - **Google OR-Tools CP-SAT Exact Optimizer**: Integer-scaled ($10,000\times$) knapsack formulation maximizing weighted multi-benefit returns subject to budget, cell capacity, available surface area, and mutual exclusivity between contradictory interventions.
+  - **Public GIS Ingestion & Zonal Statistics**: Calibrated pipelines for ISRO Bhuvan LULC, Landsat 8/9 Thermal Band 10 (LST), Sentinel-2 MSI (NDVI), WorldPop demographic density proxy, and GBIF occurrences reprojected to EPSG:32643 (UTM 43N).
+- **`apps/api`** — Fastify JSON API with session cookies, role checks (`admin`, `planner`, `viewer`), rate limiting, Swagger/OpenAPI docs, CSV/GeoJSON imports/exports, Nominatim geocoding proxy with 24h cache, and JSON/PDF executive reports.
+- **`packages/domain`** — Shared TypeScript domain models, seeded 10×10 grid generator, need-weighted greedy optimizer, what-if delta calculations, graph connectivity analysis, and composite confidence scoring.
+- **`packages/contracts`** — Shared Zod schemas and inferred TypeScript types for API contract validation.
+- **`apps/api/prisma/postgres` and `apps/api/prisma/mysql`** — Provider-specific schema and additive migration trees. Local Docker Compose uses PostgreSQL; hosted deployments support managed MySQL-compatible endpoints.
 
-Requirements: Docker Compose v2. From the repository root:
+---
+
+## Quick Start
+
+### Option 1: Local Python & Node Runtime
+
+#### 1. Backend (Python FastAPI)
+Requirements: Python 3.11+ (Python 3.12 recommended).
 
 ```bash
-cp .env.example .env
-# Replace the two ECOGRID_JWT_* values with independent random secrets (32+ characters).
-# If you need password sign-in, also replace SEED_ADMIN_PASSWORD with a long unique value.
-docker compose up --build
+cd backend
+# On Windows (use Python 3.12 if multiple versions installed):
+py -3.12 -m venv .venv
+# Or standard:
+# python -m venv .venv
+
+# Windows (Git Bash):
+source .venv/Scripts/activate
+# Windows (PowerShell):
+.\.venv\Scripts\Activate.ps1
+# Windows (Command Prompt):
+.venv\Scripts\activate.bat
+# Linux/macOS:
+# source .venv/bin/activate
+
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 3001 --reload
 ```
 
-- Web workbench: <http://localhost:3000>
-- API: <http://localhost:3001/api/health>
-- OpenAPI UI: <http://localhost:3001/api/docs>
-- PostgreSQL runs on `localhost:5432` and its Compose volume is named `ecogrid-postgres`.
+The FastAPI Swagger documentation is available at <http://localhost:3001/docs>.
 
-The API service waits for the local database, applies the PostgreSQL migration, idempotently seeds the 100-cell demo study, then starts the API. The web service runs Vite and proxies `/api` to the API container. Stop with `Ctrl+C`; use `docker compose down` to stop services. **Do not run `docker compose down -v` unless you intend to erase the local database volume.**
-
-## Quick start: local Node
-
-Requirements: Node.js 22 and pnpm 11.25.0 (the repository pins pnpm through `packageManager`). PostgreSQL is optional for read-only/demo workflows; accounts, sessions and durable writes need a configured database.
+#### 2. Frontend & Node Packages
+Requirements: Node.js 22+ and pnpm 11.25.0.
 
 ```bash
+# In repository root
 corepack enable
 corepack prepare pnpm@11.25.0 --activate
 pnpm install --frozen-lockfile
@@ -53,111 +117,144 @@ pnpm run db:generate
 pnpm dev
 ```
 
-The Vite client is served at port 3000; the Fastify API uses port 3001. Local runtime uses `API_PORT`; production honors `PORT` (3000 by default). If using PostgreSQL, set `DATABASE_PROVIDER=postgres`, configure `DATABASE_URL`, then run `pnpm run db:migrate:postgres` and `pnpm run db:seed`. For a MySQL-compatible instance, select `DATABASE_PROVIDER=mysql`, configure its URL, and use `pnpm run db:migrate:mysql`.
+- Web workbench: <http://localhost:3000>
+- Node API / Proxy: <http://localhost:3001/api/health>
 
-Copy `.env.example` to `.env` before `docker compose up`. `.env` is ignored by Git. Do not commit real passwords or signing keys.
+### Option 2: Docker Compose
 
-## Environment
-
-| Variable | Purpose |
-| --- | --- |
-| `DATABASE_URL` | Runtime database connection. Never required at image build time. |
-| `DATABASE_PROVIDER` | `postgres` for local Docker or `mysql` for the hosted database. A MySQL URL is also detected. |
-| `ECOGRID_JWT_ACCESS_SECRET` | Independent access-token signing secret, at least 32 characters. |
-| `ECOGRID_JWT_REFRESH_SECRET` | Independent refresh-token signing secret, at least 32 characters. |
-| `ACCESS_TOKEN_TTL_SECONDS` | Access cookie lifetime; defaults to 900 seconds. |
-| `REFRESH_TOKEN_TTL_DAYS` | Refresh cookie/session lifetime; defaults to 30 days. |
-| `PUBLIC_HTTPS` | Set `true` when the public origin uses HTTPS and its scheme is not conveyed in the browser `Origin` header. Published image defaults to `true`; Docker Compose overrides to `false`. |
-| `WEB_ORIGIN` | Optional comma-separated allowlist for cross-origin web clients. Same-origin deployment does not require CORS. |
-| `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | Optional bootstrap administrator. The password must contain at least 12 characters; create it only in a private environment. |
-| `API_PORT` | Local/dev Fastify listener (3001 by default). Production instead honors `PORT`. |
-| `MODEL_URL` | Optional base URL of a trained-model service (see [Trained model integration](#trained-model-integration)). Empty keeps the built-in deterministic scores. |
-| `MODEL_API_KEY` | Optional bearer key sent to the model service. |
-| `MODEL_TIMEOUT_MS` | Model request timeout; defaults to 8000, capped at 60000. |
-
-JWTs are stored in HttpOnly cookies, with `SameSite=None; Secure` for public HTTPS and `SameSite=Lax` for plain-HTTP local development. Refresh-token identifiers are hashed in the database and rotated on use. Registration creates a `viewer`; the seed bootstrap can create an `admin`. `planner` and `admin` roles may run or save plans. Do not grant planner/admin role via a public form.
-
-## Data and scoring
-
-The default study uses a configurable 10 × 10 rectangular grid (`A01`–`J10`) near 12.9352, 77.6245. Cell geometry is generated from origin, row/column count, cell-size and rotation. Named illustrative zones include North Gate, Academic Block, Central Plaza, Library Corridor and East Service Road. Each cell carries five normalized scores, green cover, feasibility, capacity, land use, surface type, priority status and confidence.
-
-The Light and Dark basemaps use the standard OpenStreetMap raster tiles with visible attribution. Dark mode applies a CSS treatment to those same tiles, so it does not depend on a second provider or a browser key. Satellite imagery is supplied by Esri.
-
-The map requests only tiles needed for the current viewport and keeps the OSM attribution visible. Respect the [OpenStreetMap tile usage policy](https://operations.osmfoundation.org/policies/tiles/) (including its cache headers and no-prefetch rule); automated map tests replace public raster requests with an in-memory test tile.
-
-The hosted MySQL runtime preserves the managed DSN and adds Prisma's `sslaccept=strict` setting when it is absent, so API queries, seeding and the container's migration step use TLS. This matches [Prisma's MySQL SSL configuration](https://www.prisma.io/docs/orm/v6/overview/databases/mysql#configuring-an-ssl-connection) and [TiDB Cloud's Prisma connection guidance](https://docs.pingcap.com/developer/dev-guide-sample-application-nodejs-prisma/), which requires `sslaccept=strict` on the public Starter endpoint.
-
-Combined Priority is `0.30 × heat + 0.25 × vegetation deficit + 0.25 × pedestrian exposure + 0.20 × connectivity need`. Risk colors use LOW 0–30 (`#7E9C8E`), MODERATE 31–60 (`#4CC38A`), HIGH 61–80 (`#F3B44E`) and CRITICAL 81–100 (`#E35D5D`).
-
-The pure deterministic optimizer generates feasible cell/intervention candidates, scores weighted benefit by need and feasibility, selects by benefit per cost within available budget and capacity, and reports rejected candidates and validation violations. The five demo interventions are native trees, shade structures, pollinator corridors, green buffers, and cool/reflective surfaces.
-
-CSV/GeoJSON score imports are persisted to the study's database cell records when a database is configured. The in-memory seeded demo mode remains available without a database; in that mode imports are intentionally process-local.
-
-## Trained model integration
-
-The API can fetch per-cell scores and confidence from an external model over HTTP. `model-service/` contains a FastAPI **stub** that implements the contract with a deterministic heuristic (not a trained model); replace `load_model()` / `predict_cell()` with your model and keep the request/response shapes.
+Requirements: Docker Compose v2.
 
 ```bash
-# 1. run the stub (or your model)
-cd model-service && pip install -r requirements.txt && uvicorn main:app --port 8000
-# 2. point the API at it (.env)
-MODEL_URL=http://localhost:8000
-# 3. as a planner/admin: POST /api/studies/study-bengaluru-east/model/refresh
-#    or use "Refresh from model" on the Data Sources page
+cp .env.example .env
+# Set random 32+ character strings for ECOGRID_JWT_ACCESS_SECRET and ECOGRID_JWT_REFRESH_SECRET
+docker compose up --build
 ```
 
-With Docker Compose: `docker compose --profile model up --build` and set `MODEL_URL=http://model:8000` in `.env`.
+- Web workbench: <http://localhost:3000>
+- API Health: <http://localhost:3001/api/health>
+- OpenAPI Docs: <http://localhost:3001/api/docs>
+- Local PostgreSQL: `localhost:5432` (`ecogrid-postgres` volume)
 
-Contract: `POST {MODEL_URL}/predict` with `{ studyId, cells: [{ id, row, col, lat, lng, landUse, surfaceType, existingGreenCover, capacity }] }` returns `{ modelVersion, predictions: [{ id, heat?, vegetation?, pedestrian?, connectivity?, confidence?, lower?, upper? }] }`; `GET {MODEL_URL}/health` returns `{ ok, modelVersion }`. Values are 0-1 and are clamped by the API. Omitted fields keep their current value. If the model is not configured, unreachable, slow, or returns an invalid response, the API keeps the existing scores and reports `source: "fallback"` with the reason. See `model-service/README.md`.
+---
 
-## API overview
+## Environment Variables
 
-All application routes are mounted under `/api`; health routes do not require authentication.
-
-| Route | Method | Behavior |
+| Variable | Default | Purpose |
 | --- | --- | --- |
-| `/api/health`, `/api/meta`, `/api/interventions` | GET | Health, defaults and intervention catalog. |
-| `/api/studies`, `/api/studies/:id`, `/api/studies/:id/cells` | GET/POST | Create/list study areas and read cells, polygons and summary metrics. |
-| `/api/optimize`, `/api/whatif`, `/api/connectivity` | POST/GET | Budget optimization, single-cell simulation, green-network analysis. Plan actions require a planner/admin session. |
-| `/api/scenarios`, `/api/scenarios/:id`, `/api/scenarios/compare` | GET/POST/PATCH/DELETE | Create, read, edit, remove and compare stored scenarios. Mutations require planner/admin. |
-| `/api/import`, `/api/export` | POST/GET | Import cell scores (and optional `confidence` / `dataConfidence`) as CSV or GeoJSON; export CSV or GeoJSON. |
-| `/api/studies/:id/confidence` | GET | Confidence summary: mean, p10, p90 and count of cells below 0.6. |
-| `/api/studies/:id/confidence/recompute` | POST | Recompute per-cell confidence from source inputs. Planner/admin. |
-| `/api/model/health` | GET | Whether the model service is configured/reachable, its version, and the last refresh. |
-| `/api/studies/:id/model/refresh` | POST | Fetch scores and confidence from the model service. Planner/admin. Keeps existing scores if the model fails. |
-| `/api/studies/:id/report` | GET | JSON or PDF report (`format=json|pdf`). |
-| `/api/auth/register`, `/api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`, `/api/auth/me` | POST/GET | Email/password sessions and role-aware identity. |
-| `/api/docs` | GET | Swagger UI. |
+| `DATABASE_URL` | `postgresql://...` | Database connection DSN (PostgreSQL or MySQL). SQLite fallback supported. |
+| `DATABASE_PROVIDER` | `postgres` | `postgres` for local Docker / PostGIS, or `mysql` for hosted instances. |
+| `API_PORT` | `3001` | Local API listener port. |
+| `PORT` | `3000` | Production listener port. |
+| `WEB_ORIGIN` | `http://localhost:3000` | Allowed CORS origin for web clients. |
+| `PUBLIC_HTTPS` | `false` | Set `true` in production to enforce `SameSite=None; Secure` cookies. |
+| `ECOGRID_JWT_ACCESS_SECRET` | — | Independent access token signing secret (32+ chars). |
+| `ECOGRID_JWT_REFRESH_SECRET` | — | Independent refresh token signing secret (32+ chars). |
+| `ACCESS_TOKEN_TTL_SECONDS` | `900` | Access cookie lifetime (15 minutes). |
+| `REFRESH_TOKEN_TTL_DAYS` | `30` | Refresh token session lifetime (30 days). |
+| `SEED_ADMIN_EMAIL` | `planner@example.test` | Bootstrap admin email. |
+| `SEED_ADMIN_PASSWORD` | — | Bootstrap admin password (12+ characters). |
+| `MODEL_URL` | `http://model:8000` | Optional external model service base URL. |
+| `MODEL_API_KEY` | — | Optional bearer key for the external model service. |
+| `MODEL_TIMEOUT_MS` | `8000` | External model request timeout (ms). |
 
-## Quality checks
+---
+
+## Data and Scoring Model
+
+### Grid Geometry and Attributes
+- Default study: Configurable 10 × 10 grid (`A01`–`J10`) around coordinates `12.9352, 77.6245`.
+- Each cell includes coordinates, `[lat, lng]` polygon ring, area name, land use, surface type, normalized scores (0–100), existing green cover, capacity, and data confidence.
+- Named campus zones include *North Gate*, *Academic Block*, *Central Plaza*, *Library Corridor*, and *East Service Road*.
+
+### Priority Weights & Risk Bands
+$$\text{Combined Priority} = 0.30 \times \text{Heat} + 0.25 \times \text{Vegetation Deficit} + 0.25 \times \text{Pedestrian Exposure} + 0.20 \times \text{Connectivity Need}$$
+
+| Band | Score Range | Color Code | Description |
+| --- | --- | --- | --- |
+| **LOW** | 0 – 30 | `#7E9C8E` | Stable microclimate and canopy cover |
+| **MODERATE** | 31 – 60 | `#4CC38A` | Secondary priority; targeted intervention |
+| **HIGH** | 61 – 80 | `#F3B44E` | High thermal stress or vegetation deficit |
+| **CRITICAL** | 81 – 100 | `#E35D5D` | Urgent intervention required; immediate heat island |
+
+### Intervention Toolkit
+1. **Native Trees**: Deep soil planting for maximum evapotranspiration and canopy shade.
+2. **Shade Structures**: Rapid shade deployment over pedestrian pathways and paved plazas.
+3. **Pollinator Corridors**: Native flowering beds restoring urban biodiversity links.
+4. **Green Buffers**: Perimeter vegetative screening reducing ambient heat and road exposure.
+5. **Cool / Reflective Surfaces**: High-albedo pavement treatments reflecting solar radiation.
+
+---
+
+## API Overview
+
+All endpoints are mounted under `/api`.
+
+| Route | Method | Description | Role / Auth |
+| --- | --- | --- | --- |
+| `/api/health` | GET | Readiness check and service metadata. | Public |
+| `/api/meta` | GET | System constants, default weights, and risk bands. | Public |
+| `/api/interventions` | GET | Complete catalog of NBS interventions and specifications. | Public |
+| `/api/studies` | GET / POST | List studies or configure a new grid. | Public / Planner |
+| `/api/studies/:id/cells` | GET | Retrieve cells, polygon rings, and live scores. | Public |
+| `/api/optimize` | POST | Run OR-Tools CP-SAT solver with greedy benchmarks & bounds. | Public (Demo) / Planner |
+| `/api/pareto` | POST | Compute multi-objective NSGA-II Pareto frontier & knee point. | Public (Demo) / Planner |
+| `/api/whatif` | POST | Single-cell intervention simulation and delta scores. | Public (Demo) / Planner |
+| `/api/connectivity` | GET | Graph connectivity, isolated patches, and ecological corridors. | Public |
+| `/api/models/status` | GET | Comprehensive status, versions, schemas, and metrics for all 4 ML models. | Public |
+| `/api/models/predict` | POST | Unified inference for Land Cover, Tree Suitability, and Microclimate. | Public |
+| `/api/ml/benchmark` | GET | Model comparison (Logistic Regression vs RF vs XGBoost). | Public |
+| `/api/ml/predict-impact` | POST | Predict microclimate temperature reduction ($\Delta T$ °C). | Public |
+| `/api/approval/:runId` | GET | Fetch human approval status for an optimization run. | Public |
+| `/api/approval` | POST | Sign off on a plan (`DRAFT`, `APPROVED`, `REJECTED`). | Planner / Admin |
+| `/api/runs` | GET | Audit trail of historical optimization runs. | Public |
+| `/api/optimization-runs/:runId` | GET | Retrieve full audit record of an optimization run by run ID. | Public |
+| `/api/monitoring/:studyId` | GET | Satellite ground truth post-intervention observations. | Public |
+| `/api/monitoring` | POST | Ingest new post-intervention ground truth observation. | Planner / Admin |
+| `/api/gis/ingest` | POST | Resample and fuse ISRO Bhuvan, Landsat & Sentinel layers. | Planner / Admin |
+| `/api/scenarios` | GET / POST | Manage stored planning scenarios. | Public / Planner |
+| `/api/scenarios/compare` | POST | Multi-scenario side-by-side comparison and deltas. | Public |
+| `/api/import` | POST | Import cell scores from CSV or GeoJSON. | Planner / Admin |
+| `/api/export` | GET | Export cell data in CSV or GeoJSON format. | Public |
+| `/api/studies/:id/report` | GET | Generate executive summary report (JSON or PDF). | Public |
+| `/api/geocode/search` | GET | Cached, rate-limited Nominatim geocoding proxy. | Public |
+| `/api/auth/register` | POST | Register viewer account. | Public |
+| `/api/auth/login` | POST | Authenticate and set HttpOnly JWT session cookies. | Public |
+| `/api/auth/logout` | POST | Clear active session. | Public |
+| `/api/auth/me` | GET | Get current authenticated user session. | Authenticated |
+
+---
+
+## Quality Checks & Testing
+
+The project maintains comprehensive test coverage across both the TypeScript and Python stacks:
 
 ```bash
-pnpm run typecheck
-pnpm run lint
+# 1. Python 6-Stage Architectural Evolution test suite
+backend\.venv\Scripts\python.exe -m pytest backend/tests/test_architectural_evolution.py -v
+
+# 2. TypeScript unit and route integration tests
 pnpm run test
+
+# 3. TypeScript compilation across all packages
+pnpm run typecheck
+
+# 4. Code quality & linting
+pnpm run lint
+
+# 5. Production build validation
 pnpm run build
+
+# 6. Playwright end-to-end map test suite
 pnpm run e2e
 ```
 
-The Playwright suite asserts that every map route renders 100 visible Leaflet cell polygons, that layer changes recolor them without losing the grid, and that cell inspection, reset, zoom, basemap switching and plan optimization preserve the polygon count. The API suite exercises the registered Fastify routes using request injection.
+The Playwright test suite validates that:
+- Every map view renders exactly 100 interactive Leaflet cell polygons.
+- Switching layers, basemaps, or budgets updates polygon styles without losing or re-mounting the grid layer.
+- Keyboard navigation (arrows, Enter, Esc), inspector drawers, and modal views function correctly across desktop and mobile viewports.
 
-## Hosted container deployment
+---
 
-The container serves the compiled React app and the API on the same listener. It honors the hosting-provided `PORT`, defaults to 3000, and exposes the unauthenticated readiness route `/api/health`. At runtime it chooses the matching provider migration tree and safely applies additive migrations before idempotently seeding the demo study. The hosted demo expects the managed MySQL-compatible `DATABASE_URL`, `DATABASE_PROVIDER=mysql`, and the two protected signing secrets. Local PostgreSQL files and hosted MySQL files share the same model structure but are maintained as separate Prisma schemas/migrations.
+## Deployment & Containerization
 
-The web/API service must be published as a container (not as static-only output). Configure a health check for `/api/health`; do not put database credentials or JWT secrets in frontend build-time variables.
-
-
-## Study-area setup and external geocoding
-
-The Data Sources page includes a live polygon-grid setup preview. Planners can configure 1–50 rows and columns, angular cell dimensions, rotation and origin; drag the origin pin; submit an explicit place search; or upload a WGS84 GeoJSON boundary. Boundary import derives the grid's rectangular extent from the GeoJSON bounds; it does **not** clip cells to the irregular source outline or persist that outline as geometry, so users should review the cells against the source boundary. Default setup remains 10 × 10 and larger study grids are bounded at 2,500 cells.
-
-Place search is deliberately submitted with a Search action instead of client-side autocomplete. The API uses Nominatim `format=jsonv2`, caches matching queries for 24 hours and serializes uncached requests at one per second per running process. The page displays Nominatim/OpenStreetMap attribution. Public-service use remains subject to the [official Nominatim Search API](https://nominatim.org/release-docs/latest/api/Search/) and [usage policy](https://operations.osmfoundation.org/policies/nominatim/); scaling beyond a modest interactive demo requires a provider or self-hosted service appropriate to the application's traffic. Source notes are kept in [`docs/external-data-sources.md`](docs/external-data-sources.md).
-
-The new `GET /api/geocode/search?q=...` route is a thin server-side proxy; the browser does not need an API key. Persisted study creation remains authenticated to planner/admin roles through `POST /api/studies`.
-
-Map PNG export downloads the visible map, current polygon layer, legend, scale and provider attribution. It attempts to include the current viewport imagery; if a browser or tile-provider CORS policy blocks raster capture, the downloaded fallback clearly states that tiles were omitted while retaining the grid, legend and attribution.
-
-| Additional route | Method | Behavior |
-| --- | --- | --- |
-| `/api/geocode/search?q=...` | GET | Explicitly submitted, cached and one-per-second Nominatim place search; the browser does not call the public geocoder directly. |
+The unified Docker container builds and serves both the React static assets and the API on a single port (default `3000`). It automatically detects whether a PostgreSQL or MySQL DSN is provided, applies provider-specific migrations, and idempotently seeds the default study area.

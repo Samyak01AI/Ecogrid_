@@ -15,7 +15,7 @@ export function StoreProvider({ cells: fallbackCells, children }: { cells: Cell[
   });
   const [plan, setPlan] = useState<OptimizerResult | null>(null);
   const [weights, setWeights] = useState<ScoreWeights>({ heat: 30, vegetation: 25, pedestrian: 25, connectivity: 20 });
-  const [budget, setBudget] = useState(25000);
+  const [budget, setBudget] = useState(500000);
   const [user, setUser] = useState<Store['user']>(null);
   const [toasts, setToasts] = useState<Store['toasts']>([]);
   const selectCell: Store['selectCell'] = (id, additive) => {

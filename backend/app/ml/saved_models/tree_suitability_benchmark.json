@@ -1,0 +1,118 @@
+{
+  "status": "trained_and_benchmarked",
+  "timestamp": "2026-10-21T14:47:14.219381+00:00",
+  "selected_model": "xgboost",
+  "champion_pipeline": "CalibratedClassifierCV",
+  "baseline_accuracy": 0.6675,
+  "random_forest_f1": 0.9447,
+  "xgboost_f1": 0.9497,
+  "xgboost_available": true,
+  "models": {
+    "baseline_logistic_regression": {
+      "name": "Logistic Regression (Baseline Pipeline)",
+      "accuracy": 0.6675,
+      "f1_score": 0.6671,
+      "precision": 0.6318,
+      "recall": 0.6828,
+      "balanced_accuracy": 0.6685,
+      "brier_score": 0.2106,
+      "spatial_cv_macro_f1": "0.7307 \u00b1 0.0091",
+      "train_time_ms": 41.96
+    },
+    "random_forest": {
+      "name": "Random Forest Calibrated Pipeline",
+      "accuracy": 0.945,
+      "f1_score": 0.9447,
+      "precision": 0.9457,
+      "recall": 0.9355,
+      "balanced_accuracy": 0.9444,
+      "brier_score": 0.0521,
+      "spatial_cv_macro_f1": "0.9332 \u00b1 0.014",
+      "train_time_ms": 1738.89
+    },
+    "xgboost": {
+      "name": "XGBoost Calibrated Pipeline",
+      "accuracy": 0.95,
+      "f1_score": 0.9497,
+      "precision": 0.9511,
+      "recall": 0.9409,
+      "balanced_accuracy": 0.9494,
+      "brier_score": 0.0453,
+      "spatial_cv_macro_f1": "0.9397 \u00b1 0.0068",
+      "train_time_ms": 1293.87
+    }
+  },
+  "spatial_holdout_test": {
+    "test_block_id": 3,
+    "samples": 400,
+    "macro_f1": 0.9497,
+    "balanced_accuracy": 0.9494,
+    "brier_score": 0.0453,
+    "confusion_matrix": [
+      [
+        205,
+        9
+      ],
+      [
+        11,
+        175
+      ]
+    ],
+    "classification_report": {
+      "0": {
+        "precision": 0.9490740740740741,
+        "recall": 0.9579439252336449,
+        "f1-score": 0.9534883720930233,
+        "support": 214.0
+      },
+      "1": {
+        "precision": 0.9510869565217391,
+        "recall": 0.9408602150537635,
+        "f1-score": 0.9459459459459459,
+        "support": 186.0
+      },
+      "accuracy": 0.95,
+      "macro avg": {
+        "precision": 0.9500805152979066,
+        "recall": 0.9494020701437043,
+        "f1-score": 0.9497171590194846,
+        "support": 400.0
+      },
+      "weighted avg": {
+        "precision": 0.9500100644122383,
+        "recall": 0.95,
+        "f1-score": 0.9499811439346323,
+        "support": 400.0
+      }
+    }
+  },
+  "regressor": {
+    "model": "GradientBoostingRegressor Pipeline",
+    "target": "microclimate_temp_drop_celsius (\u00b0C)",
+    "features": [
+      "baseline_heat",
+      "baseline_ndvi",
+      "built_ratio",
+      "trees_added",
+      "permeable_area_m2",
+      "connectivity_score"
+    ],
+    "train_samples": 1200,
+    "test_samples": 400,
+    "holdout_mae_c": 0.155,
+    "holdout_rmse_c": 0.194
+  },
+  "dataset_split": {
+    "train_blocks": [
+      0,
+      1,
+      2
+    ],
+    "train_samples": 1200,
+    "test_block": 3,
+    "test_samples": 400,
+    "total_samples": 1600
+  },
+  "data_provenance": "SYNTHETIC BENCHMARK \u2014 Spatially Blocked Physical Heuristic Distributions",
+  "known_limitations": "Model is trained on physical synthetic heuristics partitioned across spatial blocks with 5% noise. Real botanical survival records and soil geotechnical assays are required for certified civil planting."
+}

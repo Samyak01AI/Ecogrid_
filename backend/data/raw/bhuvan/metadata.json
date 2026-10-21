@@ -1,0 +1,21 @@
+{
+  "source": "ISRO Bhuvan (National Remote Sensing Centre)",
+  "dataset": "Land Use / Land Cover (LULC) 1:50,000",
+  "theme": "Urban Land Use Classification",
+  "crs": "EPSG:32643 (UTM Zone 43N) / EPSG:4326 (WGS84)",
+  "resolution": "1:50,000 Vector / 30m Raster",
+  "coverage": "Bengaluru Urban & Karnataka Study Regions",
+  "classes": {
+    "101": "Built-up / Urban Commercial / Administrative",
+    "102": "Residential Fabric",
+    "103": "Transportation Corridors / Roadways",
+    "104": "Commercial Paved / Parking Lot",
+    "105": "Public Plaza / Open Square",
+    "201": "Agricultural / Cropland / Plantation",
+    "301": "Urban Forest / High-Canopy Evergreen",
+    "302": "Scrub / Vegetated Buffer",
+    "401": "Wetland / Waterbody Buffer",
+    "501": "Vacant / Permeable Soil Zone"
+  },
+  "ingestion_status": "INDEXED_AND_READY"
+}

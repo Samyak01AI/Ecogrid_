@@ -1,0 +1,11 @@
+{
+  "source": "ESA Copernicus Sentinel-2 MSI",
+  "product": "Level-2A Bottom-Of-Atmosphere (BOA) Reflectance",
+  "bands": {
+    "B04": "Red (665 nm) - 10m resolution",
+    "B08": "Near Infrared / NIR (842 nm) - 10m resolution"
+  },
+  "index": "Normalized Difference Vegetation Index (NDVI = (NIR - Red) / (NIR + Red))",
+  "scale": "-1.0 to +1.0 (Vegetation deficit metric computed as (1 - NDVI) * 100)",
+  "ingestion_status": "CALIBRATED_FOR_ZONAL_EXTRACTION"
+}

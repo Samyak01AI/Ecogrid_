@@ -1,0 +1,7 @@
+{
+  "source": "Global Biodiversity Information Facility (GBIF)",
+  "dataset": "Urban Flora and Pollinator Occurrences (Aves, Insecta, Angiosperms)",
+  "spatial_filter": "Karnataka & Western Ghats Foothills",
+  "usage": "Biodiversity enhancement priority & ecological corridor connectivity weighting",
+  "ingestion_status": "CALIBRATED_SPECIES_OCCURRENCES"
+}

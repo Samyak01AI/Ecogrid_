@@ -1,0 +1,104 @@
+{
+  "model_name": "EcoGrid Land-Cover Spectral Classifier",
+  "model_version": "2.1.0-rf-sentinel2",
+  "champion_algorithm": "RandomForestClassifier",
+  "pipeline_stages": [
+    "SimpleImputer(median)",
+    "StandardScaler",
+    "RandomForestClassifier"
+  ],
+  "training_date": "2026-10-21T14:26:30.868211+00:00",
+  "training_samples": 2000,
+  "classes": {
+    "0": "Vegetation",
+    "1": "Built-up Surface",
+    "2": "Bare Soil",
+    "3": "Water Body"
+  },
+  "feature_schema": [
+    "band2_blue",
+    "band3_green",
+    "band4_red",
+    "band8_nir",
+    "ndvi",
+    "ndwi",
+    "ndbi"
+  ],
+  "metrics": {
+    "test_accuracy": 0.9467,
+    "macro_f1": 0.9466,
+    "balanced_accuracy": 0.9467,
+    "per_class_report": {
+      "0": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 75.0
+      },
+      "1": {
+        "precision": 0.8641975308641975,
+        "recall": 0.9333333333333333,
+        "f1-score": 0.8974358974358975,
+        "support": 75.0
+      },
+      "2": {
+        "precision": 0.927536231884058,
+        "recall": 0.8533333333333334,
+        "f1-score": 0.8888888888888888,
+        "support": 75.0
+      },
+      "3": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 75.0
+      },
+      "accuracy": 0.9466666666666667,
+      "macro avg": {
+        "precision": 0.9479334406870639,
+        "recall": 0.9466666666666667,
+        "f1-score": 0.9465811965811965,
+        "support": 300.0
+      },
+      "weighted avg": {
+        "precision": 0.9479334406870639,
+        "recall": 0.9466666666666667,
+        "f1-score": 0.9465811965811967,
+        "support": 300.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        75,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        70,
+        5,
+        0
+      ],
+      [
+        0,
+        11,
+        64,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        75
+      ]
+    ],
+    "xgboost_comparison": {
+      "accuracy": 0.9366666666666666,
+      "macro_f1": 0.9366638517267434,
+      "balanced_accuracy": 0.9366666666666666
+    }
+  },
+  "data_provenance": "SYNTHETIC BENCHMARK \u2014 Calibrated Sentinel-2 Reflectance Distributions",
+  "known_limitations": "Model is trained on physical spectral distributions for Sentinel-2 bands B2, B3, B4, B8. For operational civil planning, regional GIS ground-truth polygon validation is recommended."
+}

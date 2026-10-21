@@ -38,4 +38,62 @@ export const api = {
   compareScenarios: (input: { studyId: string; scenarioIds?: readonly string[]; budget?: number; weights?: ScoreWeights }) => request<{ scenarios: unknown[]; delta: { cost: number; benefit: number; cells: number } }>('/api/scenarios/compare', { method: 'POST', body: JSON.stringify(input) }),
   report: (studyId: string, format: 'json' | 'pdf' = 'json') => fetch(`/api/studies/${encodeURIComponent(studyId)}/report?format=${format}`, { credentials: 'include' }),
   exportUrl: (studyId: string, format: 'csv' | 'geojson') => `/api/export?studyId=${encodeURIComponent(studyId)}&format=${format}`,
+
+  // Stage 1-6 Architectural Evolution Endpoints
+  pareto: (input: { studyId?: string; budget?: number; weights?: ScoreWeights }) =>
+    request<{ status: string; pareto_size: number; pareto_front: Array<{ solution_id: string; name: string; profile: string; total_cost: number; combined_benefit: number; cells_improved: number; objectives: Record<string, number> }>; knee_point?: any }>('/api/pareto', { method: 'POST', body: JSON.stringify(input) }),
+  mlBenchmark: () =>
+    request<{ status: string; active_model: string; benchmark: { baseline_accuracy: number; random_forest_f1: number; xgboost_f1: number; selected_model: string; models: Record<string, any> } }>('/api/ml/benchmark'),
+  runs: () =>
+    request<{ runs: Array<any>; audit_entries: Array<any> }>('/api/runs'),
+  approval: (runId: string) =>
+    request<{ runId: string; approvalStatus: 'DRAFT' | 'APPROVED' | 'REJECTED'; approvedBy: string; notes: string; approvedAt?: string }>(`/api/approval/${encodeURIComponent(runId)}`),
+  updateApproval: (input: { runId: string; status: 'DRAFT' | 'APPROVED' | 'REJECTED'; approvedBy?: string; notes?: string }) =>
+    request<{ ok: boolean; runId: string; approvalStatus: string; approvedBy: string; notes: string }>('/api/approval', { method: 'POST', body: JSON.stringify(input) }),
+  monitoring: (studyId: string) =>
+    request<{ studyId: string; count: number; observations: Array<{ id: string; cellId: string; areaName: string; intervention: string; baselineTempC: number; predictedTempDropC: number; observedTempC: number; actualTempDropC: number; satelliteSource: string; observationDate: string; verdict: string }> }>(`/api/monitoring/${encodeURIComponent(studyId)}`),
+  recordMonitoring: (input: { studyId?: string; cellId: string; areaName: string; intervention: string; baselineTempC: number; observedTempC: number; satelliteSource?: string }) =>
+    request<any>('/api/monitoring', { method: 'POST', body: JSON.stringify(input) }),
+  gisIngest: (studyId?: string) =>
+    request<{ status: string; study_area: string; crs_projected: string; cells_resampled: number; layers_sampled: string[]; provenance: string }>('/api/gis/ingest', { method: 'POST', body: JSON.stringify({ studyId }) }),
+
+  // Computer Vision Satellite Surface Segmentation
+  cvStatus: () => request<{
+    status: string;
+    service: string;
+    resolution: string;
+    classes: Array<{ id: number; name: string; hex: string; label: string }>;
+    spectralIndices: string[];
+    sensorImagery: string;
+  }>('/api/cv/status'),
+  cvSegmentCell: (input: { studyId: string; cellId: string; lat?: number; lng?: number; zoom?: number }) =>
+    request<{
+      status: string;
+      cellId: string;
+      studyId: string;
+      coordinates: { lat: number; lng: number };
+      zoom: number;
+      resolutionMetersPerPx: number;
+      totalAreaSqm: number;
+      surfaceBreakdown: {
+        impervious_pavement: number;
+        tree_canopy: number;
+        grass_permeable: number;
+        building_rooftop: number;
+        water_body: number;
+      };
+      classColors: Record<string, string>;
+      permeableAreaSqm: number;
+      imperviousAreaSqm: number;
+      rooftopAreaSqm: number;
+      plantingCapacityTrees: number;
+      visionConfidence: number;
+      recommendations: Array<{ type: string; title: string; reason: string }>;
+      images: {
+        satellite: string;
+        segmentationMask: string;
+        blended: string;
+      };
+    }>('/api/cv/segment-cell', { method: 'POST', body: JSON.stringify(input) }),
 };
+
