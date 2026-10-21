@@ -41,11 +41,11 @@ export const api = {
 
   // Stage 1-6 Architectural Evolution Endpoints
   pareto: (input: { studyId?: string; budget?: number; weights?: ScoreWeights }) =>
-    request<{ status: string; pareto_size: number; pareto_front: Array<{ solution_id: string; name: string; profile: string; total_cost: number; combined_benefit: number; cells_improved: number; objectives: Record<string, number> }>; knee_point?: any }>('/api/pareto', { method: 'POST', body: JSON.stringify(input) }),
+    request<{ status: string; pareto_size: number; pareto_front: Array<{ solution_id: string; name: string; profile: string; total_cost: number; combined_benefit: number; cells_improved: number; objectives: Record<string, number> }>; knee_point?: Record<string, unknown> }>('/api/pareto', { method: 'POST', body: JSON.stringify(input) }),
   mlBenchmark: () =>
-    request<{ status: string; active_model: string; benchmark: { baseline_accuracy: number; random_forest_f1: number; xgboost_f1: number; selected_model: string; models: Record<string, any> } }>('/api/ml/benchmark'),
+    request<{ status: string; active_model: string; benchmark: { baseline_accuracy: number; random_forest_f1: number; xgboost_f1: number; selected_model: string; models: Record<string, unknown> } }>('/api/ml/benchmark'),
   runs: () =>
-    request<{ runs: Array<any>; audit_entries: Array<any> }>('/api/runs'),
+    request<{ runs: Array<Record<string, unknown>>; audit_entries: Array<Record<string, unknown>> }>('/api/runs'),
   approval: (runId: string) =>
     request<{ runId: string; approvalStatus: 'DRAFT' | 'APPROVED' | 'REJECTED'; approvedBy: string; notes: string; approvedAt?: string }>(`/api/approval/${encodeURIComponent(runId)}`),
   updateApproval: (input: { runId: string; status: 'DRAFT' | 'APPROVED' | 'REJECTED'; approvedBy?: string; notes?: string }) =>
@@ -53,7 +53,7 @@ export const api = {
   monitoring: (studyId: string) =>
     request<{ studyId: string; count: number; observations: Array<{ id: string; cellId: string; areaName: string; intervention: string; baselineTempC: number; predictedTempDropC: number; observedTempC: number; actualTempDropC: number; satelliteSource: string; observationDate: string; verdict: string }> }>(`/api/monitoring/${encodeURIComponent(studyId)}`),
   recordMonitoring: (input: { studyId?: string; cellId: string; areaName: string; intervention: string; baselineTempC: number; observedTempC: number; satelliteSource?: string }) =>
-    request<any>('/api/monitoring', { method: 'POST', body: JSON.stringify(input) }),
+    request<Record<string, unknown>>('/api/monitoring', { method: 'POST', body: JSON.stringify(input) }),
   gisIngest: (studyId?: string) =>
     request<{ status: string; study_area: string; crs_projected: string; cells_resampled: number; layers_sampled: string[]; provenance: string }>('/api/gis/ingest', { method: 'POST', body: JSON.stringify({ studyId }) }),
 

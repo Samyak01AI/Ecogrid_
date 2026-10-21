@@ -307,7 +307,10 @@ function AppFrame() {
     <main className={`app-main ${activeMap ? 'app-main-map' : ''}`}>
       <header className="topbar">
         <div className="topbar-left"><button className="mobile-menu" aria-label="Open navigation" type="button" onClick={() => setSidebarOpen(true)}><Menu size={18} /></button><div className="breadcrumb"><span>EcoGrid AI</span><ChevronRight size={13} /><b>{pageTitle?.eyebrow ?? location.pathname.slice(1).replaceAll('-', ' ').toUpperCase()}</b></div><span className={`connection-state ${apiOnline ? 'online' : 'demo-mode'}`} title={apiOnline ? 'API connected' : 'Seeded offline preview'}><i />{apiOnline ? 'API LIVE' : 'LOCAL DATA'}</span>{(() => {
-          const isReal = cells.length > 0 && cells.some((c: any) => c.dataStatus === 'validated' || c.dataSource === 'satellite' || String(c.dataLabel ?? '').includes('MEASURED') || String(c.dataLabel ?? '').includes('REAL'));
+          const isReal = cells.length > 0 && cells.some((c) => {
+            const meta = c as unknown as { dataStatus?: string; dataSource?: string; dataLabel?: string };
+            return meta.dataStatus === 'validated' || meta.dataSource === 'satellite' || String(meta.dataLabel ?? '').includes('MEASURED') || String(meta.dataLabel ?? '').includes('REAL');
+          });
           return isReal ? (
             <span className="data-provenance-pill" style={{ marginLeft: 8, fontSize: '10px', padding: '2px 7px', borderRadius: '4px', background: 'rgba(76, 195, 138, 0.15)', color: '#4cc38a', border: '1px solid rgba(76, 195, 138, 0.3)', fontWeight: 600 }}>REAL SATELLITE & GIS</span>
           ) : (
@@ -378,7 +381,7 @@ function PlannerPage({ cells, user, studyId }: { cells: Cell[]; user: UserSessio
   const [efficiencyGain, setEfficiencyGain] = useState<number | null>(null);
   const [paretoOpen, setParetoOpen] = useState(false);
   const [paretoLoading, setParetoLoading] = useState(false);
-  const [paretoSolutions, setParetoSolutions] = useState<Array<any>>([]);
+  const [paretoSolutions, setParetoSolutions] = useState<Array<{ solution_id?: string; name?: string; profile?: string; total_cost?: number; combined_benefit?: number; cells_improved?: number; objectives?: Record<string, number>; isKnee?: boolean }>>([]);
 
   const calculate = async () => {
     setWorking(true);
@@ -388,12 +391,13 @@ function PlannerPage({ cells, user, studyId }: { cells: Cell[]; user: UserSessio
     try {
       const apiResult = await api.optimize({ studyId, budget, weights, enabledInterventions: enabled });
       result = apiResult;
-      if ((apiResult as any).runId) setRunId((apiResult as any).runId);
-      if ((apiResult as any).approvalStatus) setApprovalStatus((apiResult as any).approvalStatus);
-      if ((apiResult as any).benchmark?.efficiency_gain_pct !== undefined) {
-        setEfficiencyGain((apiResult as any).benchmark.efficiency_gain_pct);
+      const ext = apiResult as OptimizerResult & { runId?: string; approvalStatus?: 'DRAFT' | 'APPROVED' | 'REJECTED'; benchmark?: { efficiency_gain_pct?: number } };
+      if (ext.runId) setRunId(ext.runId);
+      if (ext.approvalStatus) setApprovalStatus(ext.approvalStatus);
+      if (ext.benchmark?.efficiency_gain_pct !== undefined) {
+        setEfficiencyGain(ext.benchmark.efficiency_gain_pct);
       }
-    } catch (error) {
+    } catch {
       // Fallback to local optimization
       setEfficiencyGain(null);
       pushToast('Backend solver offline; using deterministic domain fallback.', 'info');
@@ -401,7 +405,7 @@ function PlannerPage({ cells, user, studyId }: { cells: Cell[]; user: UserSessio
     setPlan(result);
     setLayer('recommended');
     setOptimisticUpdated((value) => value + 1);
-    const rejectedCount = result.rejected?.length ?? (result as any).rejectedCount ?? 0;
+    const rejectedCount = result.rejected?.length ?? (result as unknown as { rejectedCount?: number }).rejectedCount ?? 0;
     const isValid = result.validation?.valid ?? true;
     pushToast(`Plan complete · ${result.selected.length} selections checked against ${rejectedCount} candidate constraints`, isValid ? 'success' : 'error');
     setWorking(false);
@@ -428,10 +432,10 @@ function PlannerPage({ cells, user, studyId }: { cells: Cell[]; user: UserSessio
     setParetoOpen(true);
     try {
       const res = await api.pareto({ studyId, budget, weights });
-      const kneeId = res.knee_point?.solution_id;
-      setParetoSolutions((res.pareto_front || []).map((s: any) => ({
+      const kneeId = (res.knee_point as { solution_id?: string } | undefined)?.solution_id;
+      setParetoSolutions((res.pareto_front || []).map((s) => ({
         ...s,
-        isKnee: s.solution_id === kneeId || s.name?.includes('Knee Point'),
+        isKnee: s.solution_id === kneeId || Boolean(s.name?.includes('Knee Point')),
       })));
     } catch {
       pushToast('Could not load Pareto frontier from API.', 'error');
@@ -509,7 +513,7 @@ function PlannerPage({ cells, user, studyId }: { cells: Cell[]; user: UserSessio
             <div style={{ padding: '30px', textAlign: 'center', color: '#aaa' }}><RefreshCw size={18} className="spin" /> Computing Pareto Frontier…</div>
           ) : (
             <div className="pareto-modal-grid">
-              {paretoSolutions.map((sol: any, idx: number) => (
+              {paretoSolutions.map((sol, idx: number) => (
                 <div key={idx} className={`pareto-card ${sol.isKnee ? 'is-knee' : ''}`}>
                   <div className="pareto-card-header">
                     <b>{sol.name || sol.solution_id}</b>
@@ -648,17 +652,34 @@ function AnalyticsPage({ cells, plan }: { cells: Cell[]; plan: OptimizerResult }
   </>;
 }
 
-function CellInspector({ cell, comparison, studyId, plan, onClose, onPlan }: { cell: Cell; comparison: Cell[]; studyId: string; plan?: any; onClose: () => void; onPlan: () => void }) {
+function CellInspector({ cell, comparison, studyId, plan, onClose, onPlan }: { cell: Cell; comparison: Cell[]; studyId: string; plan?: OptimizerResult | null; onClose: () => void; onPlan: () => void }) {
   const score = combinedPriority(cell.scores);
   const [quantity, setQuantity] = useState(1);
   const [intervention, setIntervention] = useState<InterventionId>('native_trees');
   const result = simulateWhatIf(cell, intervention, quantity);
 
-  const selectedIntervention = (plan?.selected || []).find((item: any) => item.cellId === cell.id);
-  const rejectedCandidate = (plan?.rejected || []).find((item: any) => (item.candidate?.cellId === cell.id || item.cellId === cell.id));
+  type InspectorIntervention = {
+    cellId: string;
+    interventionName?: string;
+    modelStatus?: string;
+    quantity?: number;
+    unit?: string;
+    cost?: number;
+    suitabilityScore?: number;
+    reasons?: string[];
+  };
+  type InspectorRejected = {
+    candidate?: { cellId?: string };
+    cellId?: string;
+    reason?: string;
+    reasons?: string[];
+  };
+
+  const selectedIntervention = ((plan?.selected || []) as unknown as InspectorIntervention[]).find((item) => item.cellId === cell.id);
+  const rejectedCandidate = ((plan?.rejected || []) as unknown as InspectorRejected[]).find((item) => (item.candidate?.cellId === cell.id || item.cellId === cell.id));
 
   // Computer Vision State
-  const [cvData, setCvData] = useState<any>(null);
+  const [cvData, setCvData] = useState<Awaited<ReturnType<typeof api.cvSegmentCell>> | null>(null);
   const [cvLoading, setCvLoading] = useState(false);
   const [cvViewMode, setCvViewMode] = useState<'blended' | 'satellite' | 'mask'>('blended');
 
@@ -683,7 +704,7 @@ function CellInspector({ cell, comparison, studyId, plan, onClose, onPlan }: { c
         if (active) setCvLoading(false);
       });
     return () => { active = false; };
-  }, [cell.id, studyId]);
+  }, [cell.center, cell.id, studyId]);
 
   const chooseIntervention = async () => {
     try { await api.whatIf({ studyId, cellId: cell.id, interventionId: intervention, quantity }); } catch { /* The local what-if preview remains deterministic and available offline. */ }
@@ -722,42 +743,52 @@ function CellInspector({ cell, comparison, studyId, plan, onClose, onPlan }: { c
         <RiskPill score={score} />
         <span className="inspector-landuse">{cell.landUse.replaceAll('_', ' ')}</span>
         <span className="inspector-confidence"><ShieldCheck size={12} />{Math.round(cell.dataConfidence * 100)}% confidence</span>
-        <span className="inspector-provenance-badge" style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(234, 179, 8, 0.15)', color: '#eab308', border: '1px solid rgba(234, 179, 8, 0.3)', fontWeight: 600 }}>
-          {((cell as any).dataLabel?.includes('SYNTHETIC') || (cell as any).dataSource === 'synthetic_demo') ? 'SYNTHETIC DEMO DATA' : 'REAL DATA'}
-        </span>
+        {(() => {
+          const meta = cell as unknown as { dataLabel?: string; dataSource?: string; treeSuitability?: number; availableArea?: number; undergroundClearance?: number; roadClearance?: number };
+          return (
+            <span className="inspector-provenance-badge" style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(234, 179, 8, 0.15)', color: '#eab308', border: '1px solid rgba(234, 179, 8, 0.3)', fontWeight: 600 }}>
+              {(meta.dataLabel?.includes('SYNTHETIC') || meta.dataSource === 'synthetic_demo') ? 'SYNTHETIC DEMO DATA' : 'REAL DATA'}
+            </span>
+          );
+        })()}
       </div>
 
       {/* ML PREDICTION & HARD SAFETY CONSTRAINTS */}
-      <div className="panel inspector-ml-card" style={{ marginTop: '12px', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-          <span className="panel-kicker" style={{ color: '#4CC38A' }}>ML TREE SUITABILITY</span>
-          <span style={{ fontSize: '10px', background: 'rgba(76, 195, 138, 0.2)', color: '#4CC38A', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
-            ML PREDICTION (2.1.0-CALIBRATED)
-          </span>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px' }}>
-          <div>
-            <span style={{ color: '#888', display: 'block', fontSize: '10px' }}>PREDICTED SUITABILITY</span>
-            <b>{((cell as any).treeSuitability ?? Math.round(cell.scores.vegetation * 100))}%</b>
+      {(() => {
+        const meta = cell as unknown as { treeSuitability?: number; availableArea?: number; undergroundClearance?: number; roadClearance?: number };
+        return (
+          <div className="panel inspector-ml-card" style={{ marginTop: '12px', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <span className="panel-kicker" style={{ color: '#4CC38A' }}>ML TREE SUITABILITY</span>
+              <span style={{ fontSize: '10px', background: 'rgba(76, 195, 138, 0.2)', color: '#4CC38A', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                ML PREDICTION (2.1.0-CALIBRATED)
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px' }}>
+              <div>
+                <span style={{ color: '#888', display: 'block', fontSize: '10px' }}>PREDICTED SUITABILITY</span>
+                <b>{(meta.treeSuitability ?? Math.round(cell.scores.vegetation * 100))}%</b>
+              </div>
+              <div>
+                <span style={{ color: '#888', display: 'block', fontSize: '10px' }}>PLANTING SPACE</span>
+                <b>{(meta.availableArea ?? 45)} m²</b>
+              </div>
+              <div>
+                <span style={{ color: '#888', display: 'block', fontSize: '10px' }}>UTILITY CLEARANCE</span>
+                <b>{(meta.undergroundClearance ?? 6.0)} m</b>
+              </div>
+              <div>
+                <span style={{ color: '#888', display: 'block', fontSize: '10px' }}>SIGHTLINE SETBACK</span>
+                <b>{(meta.roadClearance ?? 8.0)} m</b>
+              </div>
+            </div>
+            <div style={{ marginTop: '8px', fontSize: '10px', color: '#94a3b8', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '6px' }}>
+              <ShieldCheck size={11} style={{ verticalAlign: 'middle', marginRight: '4px', color: '#4CC38A' }} />
+              <span>Safety Policy: High ML score NEVER overrides underground utility (3m) or road sightline (2.5m) setbacks.</span>
+            </div>
           </div>
-          <div>
-            <span style={{ color: '#888', display: 'block', fontSize: '10px' }}>PLANTING SPACE</span>
-            <b>{((cell as any).availableArea ?? 45)} m²</b>
-          </div>
-          <div>
-            <span style={{ color: '#888', display: 'block', fontSize: '10px' }}>UTILITY CLEARANCE</span>
-            <b>{((cell as any).undergroundClearance ?? 6.0)} m</b>
-          </div>
-          <div>
-            <span style={{ color: '#888', display: 'block', fontSize: '10px' }}>SIGHTLINE SETBACK</span>
-            <b>{((cell as any).roadClearance ?? 8.0)} m</b>
-          </div>
-        </div>
-        <div style={{ marginTop: '8px', fontSize: '10px', color: '#94a3b8', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '6px' }}>
-          <ShieldCheck size={11} style={{ verticalAlign: 'middle', marginRight: '4px', color: '#4CC38A' }} />
-          <span>Safety Policy: High ML score NEVER overrides underground utility (3m) or road sightline (2.5m) setbacks.</span>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* OPTIMIZER RECOMMENDATION & DECISION EXPLAINABILITY (WHAT -> WHERE -> HOW MUCH -> WHY -> COST -> IMPACT) */}
       {selectedIntervention ? (
@@ -783,7 +814,7 @@ function CellInspector({ cell, comparison, studyId, plan, onClose, onPlan }: { c
             </div>
             <div>
               <span style={{ color: '#888', display: 'block', fontSize: '9px' }}>SUITABILITY</span>
-              <b style={{ color: '#4CC38A' }}>{selectedIntervention.suitabilityScore ?? ((cell as any).treeSuitability || 50)}%</b>
+              <b style={{ color: '#4CC38A' }}>{selectedIntervention.suitabilityScore ?? ((cell as unknown as { treeSuitability?: number }).treeSuitability || 50)}%</b>
             </div>
           </div>
 
@@ -1032,9 +1063,27 @@ function ReportsPage({ cells, plan, studyId }: { cells: Cell[]; plan: OptimizerR
 function DataSourcesPage({ cells, studyId }: { cells: Cell[]; studyId: string }) {
   const { pushToast, setCells, studies } = useEcoStore();
   const [importName, setImportName] = useState('');
-  const [modelStatus, setModelStatus] = useState<Awaited<ReturnType<typeof api.modelHealth>> | null>(null);
-  const [mlBench, setMlBench] = useState<any>(null);
-  const [monitoringObs, setMonitoringObs] = useState<Array<any>>([]);
+  const [, setModelStatus] = useState<Awaited<ReturnType<typeof api.modelHealth>> | null>(null);
+  const [mlBench, setMlBench] = useState<{
+    baseline_accuracy: number;
+    random_forest_f1: number;
+    xgboost_f1: number;
+    selected_model: string;
+    models: Record<string, unknown>;
+  } | null>(null);
+  const [monitoringObs, setMonitoringObs] = useState<Array<{
+    id: string;
+    cellId: string;
+    areaName: string;
+    intervention: string;
+    baselineTempC: number;
+    predictedTempDropC: number;
+    observedTempC: number;
+    actualTempDropC: number;
+    satelliteSource: string;
+    observationDate: string;
+    verdict: string;
+  }>>([]);
   const [ingestingGis, setIngestingGis] = useState(false);
 
   useEffect(() => {
