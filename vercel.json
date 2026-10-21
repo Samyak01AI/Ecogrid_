@@ -1,0 +1,15 @@
+{
+  "framework": "vite",
+  "buildCommand": "pnpm run build:packages && pnpm --filter @ecogrid/web build",
+  "outputDirectory": "apps/web/dist",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://ecogrid-api-3bjn.onrender.com/api/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
