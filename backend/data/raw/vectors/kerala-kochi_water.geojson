@@ -1,0 +1,86 @@
+{
+  "type": "FeatureCollection",
+  "name": "Kochi Backwaters and Shipping Channels",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Mattancherry Channel",
+        "type": "tidal_channel"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              76.26,
+              9.932
+            ],
+            [
+              76.269,
+              9.932
+            ],
+            [
+              76.271,
+              9.944
+            ],
+            [
+              76.2695,
+              9.955
+            ],
+            [
+              76.264,
+              9.962
+            ],
+            [
+              76.258,
+              9.955
+            ],
+            [
+              76.258,
+              9.94
+            ],
+            [
+              76.26,
+              9.932
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Ernakulam Channel / Port Basin",
+        "type": "deepwater_port"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              76.279,
+              9.935
+            ],
+            [
+              76.289,
+              9.935
+            ],
+            [
+              76.288,
+              9.96
+            ],
+            [
+              76.28,
+              9.96
+            ],
+            [
+              76.279,
+              9.935
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

@@ -11,6 +11,7 @@
     "dev": "pnpm run build:packages && pnpm run db:generate && concurrently -k -n API,WEB -c green,cyan \"pnpm --filter @ecogrid/api dev\" \"pnpm --filter @ecogrid/web dev\"",
     "dev:backend": "backend/.venv/Scripts/python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 3001 --reload",
     "test:backend": "backend/.venv/Scripts/python -m pytest backend/tests -v",
+    "seed:gis": "backend/.venv/Scripts/python backend/app/gis/seed_real_datasets.py",
     "dev:web": "pnpm --filter @ecogrid/web dev",
     "build": "pnpm run build:packages && pnpm run db:generate && pnpm --filter @ecogrid/api build && pnpm --filter @ecogrid/web build",
     "typecheck": "pnpm run build:packages && pnpm run db:generate && pnpm --filter @ecogrid/api typecheck && pnpm --filter @ecogrid/web typecheck",

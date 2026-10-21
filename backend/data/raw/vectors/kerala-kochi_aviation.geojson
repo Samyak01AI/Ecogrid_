@@ -1,0 +1,40 @@
+{
+  "type": "FeatureCollection",
+  "name": "INS Garuda Naval Air Station Clearance",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Naval Airfield Main Runway & Clearway",
+        "restriction": "trees_prohibited"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              76.2725,
+              9.943
+            ],
+            [
+              76.2775,
+              9.943
+            ],
+            [
+              76.2775,
+              9.954
+            ],
+            [
+              76.2725,
+              9.954
+            ],
+            [
+              76.2725,
+              9.943
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

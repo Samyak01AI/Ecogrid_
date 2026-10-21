@@ -1,0 +1,39 @@
+{
+  "type": "FeatureCollection",
+  "name": "Kochi Arterial Corridors",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "NH 966B / Bristow Road"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              76.269,
+              9.938
+            ],
+            [
+              76.273,
+              9.938
+            ],
+            [
+              76.273,
+              9.941
+            ],
+            [
+              76.269,
+              9.941
+            ],
+            [
+              76.269,
+              9.938
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

@@ -68,7 +68,12 @@ flowchart TB
   - **Computer Vision Satellite Segmentation**: 0.58m/px semantic segmentation of high-resolution aerial tiles (Esri World Imagery) classifying impervious pavement, mature tree canopy, permeable grass, rooftops, and water bodies.
   - **NetworkX Green Connectivity Analysis**: Graph percolation modeling nodes as green spaces and edges as spatial adjacency, identifying corridor bottleneck cells.
   - **Google OR-Tools CP-SAT Exact Optimizer**: Integer-scaled ($10,000\times$) knapsack formulation maximizing weighted multi-benefit returns subject to budget, cell capacity, available surface area, and mutual exclusivity between contradictory interventions.
-  - **Public GIS Ingestion & Zonal Statistics**: Calibrated pipelines for ISRO Bhuvan LULC, Landsat 8/9 Thermal Band 10 (LST), Sentinel-2 MSI (NDVI), WorldPop demographic density proxy, and GBIF occurrences reprojected to EPSG:32643 (UTM 43N).
+  - **Real Geospatial Data Ingestion & Zonal Analytics Engine (`app.gis.real_ingestion`)**:
+    - **Georeferenced GeoTIFF Rasters**: Reads and writes georeferenced rasters (`ModelTiepointTag`, `ModelPixelScaleTag`) using `tifffile` for Sentinel-2 NDVI/NDWI and Landsat 8/9 LST without requiring heavy GDAL C++ binaries.
+    - **Cadastral & Vector Overlay**: Ingests GeoJSON vector boundaries (coastlines, shipping channels, aviation runways, road corridors, underground utilities) using `shapely` spatial indexing.
+    - **Physical & Legal Safety Gating**: Enforces automatic vetoes on water cells (`feasibility = 0.0`, `capacity = 0`) and airport runways (civil aviation Obstacle Limitation Surface clearance).
+    - **Data Provenance**: Elevates cell data from `SYNTHETIC DEMO DATA` to `VALIDATED` (`data_source: "satellite"`, `provenance_flags: ["EMPIRICAL_INGESTION", "SENTINEL2_NDVI", "LANDSAT_LST", "WATER_BODY_VETO"]`).
+    - **Pre-Seeded Real Datasets**: Bundled datasets for **Kochi, Kerala** (`kerala-kochi`) and **Bengaluru East** (`bengaluru-east`). Run `python -m app.gis.seed_real_datasets` to seed.
 - **`apps/api`** — Fastify JSON API with session cookies, role checks (`admin`, `planner`, `viewer`), rate limiting, Swagger/OpenAPI docs, CSV/GeoJSON imports/exports, Nominatim geocoding proxy with 24h cache, and JSON/PDF executive reports.
 - **`packages/domain`** — Shared TypeScript domain models, seeded 10×10 grid generator, need-weighted greedy optimizer, what-if delta calculations, graph connectivity analysis, and composite confidence scoring.
 - **`packages/contracts`** — Shared Zod schemas and inferred TypeScript types for API contract validation.

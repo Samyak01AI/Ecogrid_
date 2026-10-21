@@ -318,7 +318,16 @@ def generate_grid(
                 capacity=context["capacity"],
             ))
 
-    # Enhance cells directly with champion ML Tree Suitability predictions
+    # Step A: Apply real geospatial data ingestion (Sentinel-2, Landsat, OSM/Cadastral vectors) if available
+    try:
+        from app.gis.real_ingestion import real_geospatial_pipeline
+        if real_geospatial_pipeline.has_study_data(study_id, study_name=name, lat=origin_lat, lng=origin_lng):
+            ingest_res = real_geospatial_pipeline.ingest_and_apply(cells, study_id=study_id, study_name=name)
+            logger.info("Real geospatial data applied for %s (%s): %s", study_id, name, ingest_res)
+    except Exception as e:
+        logger.warning("Could not apply real geospatial pipeline for %s: %s", study_id, e)
+
+    # Step B: Enhance cells directly with champion ML Tree Suitability predictions
     try:
         from app.ml.tree_suitability import predict_tree_suitability
         ml_preds = predict_tree_suitability(cells)

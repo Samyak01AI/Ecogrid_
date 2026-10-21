@@ -14,3 +14,10 @@ apps/api/prisma/generated/
 **/tsconfig.tsbuildinfo
 **/*.tsbuildinfo
 .neon
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+backend/.venv/

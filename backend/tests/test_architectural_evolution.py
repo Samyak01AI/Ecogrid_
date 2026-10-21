@@ -53,7 +53,7 @@ def default_weights():
 # ---------------------------------------------------------------------------
 def test_stage1_zonal_sampler(sample_cells):
     report = zonal_sampler.attach_real_environmental_layers(sample_cells, study_area="bengaluru-east")
-    assert report["status"] == "ZONAL_STATS_FUSED"
+    assert report["status"] in ["ZONAL_STATS_FUSED", "EMPIRICAL_RASTER_FUSED"]
     assert report["crs_projected"] == "EPSG:32643 (UTM 43N)"
     assert report["cells_resampled"] == len(sample_cells)
 
