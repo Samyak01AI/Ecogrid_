@@ -1,0 +1,40 @@
+{
+  "type": "FeatureCollection",
+  "name": "Delhi Metro Underground Utility Corridors",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Yellow Line Subway & Telecom Duct",
+        "depth_m": 4.5
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              77.214,
+              28.611
+            ],
+            [
+              77.217,
+              28.611
+            ],
+            [
+              77.217,
+              28.63
+            ],
+            [
+              77.214,
+              28.63
+            ],
+            [
+              77.214,
+              28.611
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

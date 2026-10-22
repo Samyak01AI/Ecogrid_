@@ -26,9 +26,10 @@ from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from app.config import settings
+from app.reporting.pdf_report import generate_climate_report_pdf
 from app.cv.satellite_segmentation import (
     CLASS_COLORS,
     CLASS_HEX,
@@ -92,6 +93,8 @@ from app.scoring.scoring_engine import (
     risk_band,
 )
 from app.services.interventions import INTERVENTIONS, INTERVENTION_BY_ID
+from app.services.ai_planning import ai_planning_service
+from app.services.grok_pool import grok_pool
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +198,12 @@ def _get_or_generate_cells(study_id: str) -> list[CellResponse]:
     # Check if cached cells need real geospatial upgrade
     try:
         from app.gis.real_ingestion import real_geospatial_pipeline
-        if cells and cells[0].data_status == DataStatus.DEMO and real_geospatial_pipeline.has_study_data(sid, study_name=name, lat=origin[0], lng=origin[1]):
+        has_real = real_geospatial_pipeline.has_study_data(sid, study_name=name, lat=origin[0], lng=origin[1])
+        needs_upgrade = cells and (
+            cells[0].data_status == DataStatus.DEMO
+            or "EMPIRICAL_INGESTION" not in getattr(cells[0], "provenance_flags", [])
+        )
+        if has_real and needs_upgrade:
             real_geospatial_pipeline.ingest_and_apply(cells, study_id=sid, study_name=name)
             from app.ml.tree_suitability import predict_tree_suitability
             preds = predict_tree_suitability(cells)
@@ -505,20 +513,45 @@ async def get_study_report(
     study_id: str,
     format: str = Query("json"),
     budget: float = Query(500000.0),
+    inline: bool = Query(False),
 ):
     cells = _get_or_generate_cells(study_id)
     study = _study_cache.get(study_id) or _study_cache.get(DEFAULT_STUDY_ID, {})
+    study_info = _format_study(study) if study else {}
+    study_name = study_info.get("name", study_id) if isinstance(study_info, dict) else study_id
     weights = ScoreWeights(w_heat=30, w_greenery=25, w_pedestrian=25, w_connectivity=20, w_biodiversity=0)
     plan_res = optimize_plan(cells=cells, budget=budget, weights=weights)
     conn_res = analyze_connectivity(cells, [c.cell_id for c in plan_res.selected])
 
+    cell_count = len(cells)
+    priority_count = sum(1 for c in cells if c.priority_zone)
+    critical_count = sum(1 for c in cells if risk_band(combined_priority(c.scores)) == "CRITICAL")
+
+    if format.lower() == "pdf":
+        pdf_bytes = generate_climate_report_pdf(
+            study_name=study_name,
+            study_id=study_id,
+            cell_count=cell_count,
+            priority_count=priority_count,
+            critical_count=critical_count,
+            plan=plan_res,
+            connectivity=conn_res,
+            budget=budget,
+        )
+        disposition_type = "inline" if inline else "attachment"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'{disposition_type}; filename="ecogrid-{study_id}-climate-plan.pdf"'},
+        )
+
     report_data = {
         "generatedAt": datetime.now(timezone.utc).isoformat(),
-        "study": _format_study(study) if study else {},
-        "cellCount": len(cells),
-        "polygonCount": len(cells),
-        "priorityCells": sum(1 for c in cells if c.priority_zone),
-        "criticalCells": sum(1 for c in cells if risk_band(combined_priority(c.scores)) == "CRITICAL"),
+        "study": study_info,
+        "cellCount": cell_count,
+        "polygonCount": cell_count,
+        "priorityCells": priority_count,
+        "criticalCells": critical_count,
         "plan": plan_res.model_dump() if hasattr(plan_res, "model_dump") else plan_res,
         "connectivity": conn_res.model_dump() if hasattr(conn_res, "model_dump") else conn_res,
     }
@@ -1070,6 +1103,8 @@ async def predict_intervention_microclimate(payload: dict):
 async def list_optimization_runs(study_id: Optional[str] = Query(None)):
     """Fetch history of previous optimization runs with benchmarks."""
     runs = list(_optimization_runs.values())
+    if study_id:
+        runs = [r for r in runs if r.get("studyId") == study_id]
     runs.reverse()
     return {"runs": runs[:25], "audit_entries": get_audit_log()[-25:]}
 
@@ -1558,8 +1593,157 @@ async def cv_segment_cell(payload: dict):
 
 
 # ---------------------------------------------------------------------------
+# AI Planning Assistant & Multi-Key Grok Intelligence Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/ai/status")
+async def get_ai_pool_status():
+    """Returns telemetry on Grok multi-key pool, active key index, and failover metrics."""
+    return grok_pool.get_pool_status()
+
+
+@app.post("/api/ai/assistant")
+async def ai_assistant_endpoint(payload: dict):
+    """
+    AI Planning Assistant:
+    Answers questions like 'Why was this location prioritized?' using the site's actual data.
+    """
+    study_id = payload.get("studyId") or DEFAULT_STUDY_ID
+    cell_id = payload.get("cellId")
+    question = payload.get("question")
+    plan_id = payload.get("planId")
+
+    cells = _get_or_generate_cells(study_id)
+    cell = next((c for c in cells if c.cell_id == cell_id), None)
+    if not cell:
+        if "cell" in payload and isinstance(payload["cell"], dict):
+            cell_data = payload["cell"]
+        else:
+            raise HTTPException(status_code=404, detail=f"Cell '{cell_id}' not found in study '{study_id}'.")
+    else:
+        cell_data = _format_cell(cell)
+
+    # Pull active plan if available
+    plan_data = payload.get("plan")
+    if not plan_data and plan_id and plan_id in _optimization_runs:
+        plan_data = _optimization_runs[plan_id]
+    elif not plan_data and _optimization_runs:
+        matching_runs = [r for r in _optimization_runs.values() if r.get("studyId") == study_id]
+        plan_data = matching_runs[-1] if matching_runs else list(_optimization_runs.values())[-1]
+
+    study = _study_cache.get(study_id, {})
+    study_name = study.get("name", "Study Area")
+
+    res = await ai_planning_service.answer_planning_question(
+        cell_data=cell_data,
+        question=question,
+        plan_data=plan_data,
+        study_name=study_name,
+    )
+    return res
+
+
+@app.post("/api/ai/scenario-explain")
+async def ai_scenario_explain_endpoint(payload: dict):
+    """
+    Scenario Explanation:
+    Explains why a plan changed after budget or environmental priorities were adjusted.
+    """
+    study_id = payload.get("studyId") or DEFAULT_STUDY_ID
+    baseline = payload.get("baseline", {})
+    proposal = payload.get("proposal", {})
+    delta = payload.get("delta")
+
+    study = _study_cache.get(study_id, {})
+    study_name = study.get("name", "Study Area")
+
+    res = await ai_planning_service.explain_scenario_comparison(
+        baseline=baseline,
+        proposal=proposal,
+        delta=delta,
+        study_name=study_name,
+    )
+    return res
+
+
+@app.post("/api/ai/impact-summary")
+async def ai_impact_summary_endpoint(payload: dict):
+    """
+    Impact Report Summary:
+    Turns calculated results into concise executive summary, key trade-offs, and suggested next steps.
+    """
+    study_id = payload.get("studyId") or DEFAULT_STUDY_ID
+    budget = float(payload.get("budget", 500000.0))
+    plan_data = payload.get("plan") or {}
+
+    cells = _get_or_generate_cells(study_id)
+    cells_summary = {
+        "cellCount": len(cells),
+        "priorityCount": sum(1 for c in cells if c.priority_zone),
+    }
+
+    study = _study_cache.get(study_id, {})
+    study_name = study.get("name", "Study Area")
+
+    res = await ai_planning_service.summarize_impact_report(
+        study_name=study_name,
+        plan_data=plan_data,
+        cells_summary=cells_summary,
+        budget=budget,
+    )
+    return res
+
+
+@app.post("/api/ai/validate-plan")
+async def ai_validate_plan_endpoint(payload: dict):
+    """
+    Recommendation Validation Assistance:
+    Flags missing assumptions and explains constraint violations while backend strictly enforces constraints.
+    """
+    study_id = payload.get("studyId") or DEFAULT_STUDY_ID
+    budget = float(payload.get("budget", 500000.0))
+    plan_data = payload.get("plan") or {}
+
+    cells = _get_or_generate_cells(study_id)
+
+    selected_raw = plan_data.get("selected", [])
+    selected_cands = []
+    for s in selected_raw:
+        int_id_str = s.get("interventionId", "native_trees")
+        if int_id_str == "pollinator_corridor":
+            int_id_str = "pollinator_strip"
+        try:
+            int_enum = InterventionId(int_id_str)
+        except Exception:
+            int_enum = InterventionId.NATIVE_TREES
+
+        interv_def = INTERVENTION_BY_ID.get(int_enum)
+        selected_cands.append(CandidateIntervention(
+            cell_id=s.get("cellId", "C01"),
+            intervention_id=int_enum,
+            intervention_name=s.get("interventionName", interv_def.name if interv_def else "Intervention"),
+            quantity=int(s.get("quantity", 1)),
+            cost=float(s.get("cost", 10000.0)),
+            unit=s.get("unit", "units"),
+            area_name=s.get("areaName", "Site"),
+            suitability_score=float(s.get("suitabilityScore", 60.0)),
+        ))
+
+    validation_result = validate_plan_constraints(cells, selected_cands, budget)
+
+    res = await ai_planning_service.assist_recommendation_validation(
+        plan_data=plan_data,
+        validation_result=validation_result,
+        cells=[_format_cell(c) for c in cells[:20]],
+        budget=budget,
+    )
+    return res
+
+
+# ---------------------------------------------------------------------------
 # Run server directly
 # ---------------------------------------------------------------------------
+
 
 if __name__ == "__main__":
     import uvicorn

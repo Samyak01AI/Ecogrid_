@@ -9,6 +9,7 @@ All demo data is SYNTHETIC and clearly labelled.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 from typing import Optional
@@ -35,8 +36,19 @@ from app.schemas.schemas import (
 # ---------------------------------------------------------------------------
 ROW_LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 WGS84 = CRS.from_epsg(4326)
-# UTM Zone 43N (appropriate for Bengaluru / central India demo)
+# Default fallback UTM Zone 43N
 PROJECTED_CRS = CRS.from_epsg(32643)
+
+
+def get_projected_crs(origin_lng: float, origin_lat: float) -> CRS:
+    """Determine appropriate UTM projected CRS for metric distance and area calculations."""
+    zone = int((origin_lng + 180) / 6) + 1
+    epsg_code = 32600 + zone if origin_lat >= 0 else 32700 + zone
+    try:
+        return CRS.from_epsg(epsg_code)
+    except Exception:
+        return PROJECTED_CRS
+
 
 
 def _row_label(index: int) -> str:
@@ -50,34 +62,118 @@ def _row_label(index: int) -> str:
     return label
 
 
+def _study_seed(study_id: str, default_seed: int = 20261010) -> int:
+    """Generate a stable, distinct deterministic seed for each study area."""
+    if not study_id or study_id in ["ecogrid-campus-demo", "default"]:
+        return default_seed
+    return int(hashlib.sha256(study_id.encode("utf-8")).hexdigest()[:8], 16)
+
+
 def _seeded_rng(seed: int = 20261010):
     """Deterministic seeded random generator using numpy for reproducibility."""
     return np.random.RandomState(seed)
 
 
 # ---------------------------------------------------------------------------
-# Zone definitions for the demo campus
+# Zone definitions by study area
 # ---------------------------------------------------------------------------
 
-def _named_zone(row: int, col: int, rows: int, cols: int) -> str:
-    """Assign descriptive zone names for the EcoGrid Campus Demo."""
-    # Zone A: High heat, low vegetation (top-center)
+def _named_zone(row: int, col: int, rows: int, cols: int, study_id: str = "") -> str:
+    """Assign descriptive, location-realistic zone names based on study area and coordinates."""
+    sid = study_id.lower()
+
+    if "delhi" in sid:
+        # New Delhi Central Corridor (Central Vista, Janpath, Connaught Place)
+        if 4 <= row <= 5 and 3 <= col <= 6:
+            return "Kartavya Path Central Avenue (Zone C)"
+        if row <= 1 and 3 <= col <= 6:
+            return "Connaught Place Outer Radial (Zone A)"
+        if 2 <= row <= 3 and 3 <= col <= 6:
+            return "National Museum & Cultural Precinct"
+        if 4 <= row <= 6 and col >= 7:
+            return "India Gate Hexagon & Radial Canopy"
+        if 6 <= row <= 8 and col <= 2:
+            return "Janpath Metro & Market Transit Node"
+        if 3 <= row <= 5 and col <= 2:
+            return "Central Secretariat / Udyog Bhawan Complex"
+        if row >= 7 and 3 <= col <= 6:
+            return "Central Vista Lawn & Water Canal"
+        if row >= 7 and col >= 7:
+            return "Shahjahan Road Protected Green Verge"
+        if row <= 2 and col <= 2:
+            return "Western Court Institutional Campus"
+        if row <= 2 and col >= 7:
+            return "Barakhamba Commercial Corridor"
+        if 5 <= row <= 6 and col <= 2:
+            return "Rail Bhawan Transit Verge"
+        return "New Delhi Administrative Block"
+
+    if "pimpri" in sid or "bhosari" in sid:
+        # Pimpri Industrial Area, Pimpri-Chinchwad (MIDC, Auto Cluster, Pavana River)
+        if row <= 1 and 3 <= col <= 6:
+            return "MIDC Bhosari Foundry & Metal Stamping Cluster"
+        if row <= 2 and col <= 2:
+            return "Pune-Nashik Highway Logistics Transit Verge"
+        if row <= 2 and col >= 7:
+            return "Auto Cluster R&D Test Track"
+        if 2 <= row <= 3 and 3 <= col <= 6:
+            return "Heavy Industrial Fabrication Yard"
+        if 3 <= row <= 5 and col <= 2:
+            return "Telco Road Green Buffer"
+        if 4 <= row <= 6 and 4 <= col <= 7:
+            return "MSETCL 220kV High-Tension Transmission Corridor"
+        if 5 <= row <= 7 and col >= 7:
+            return "Assembly & Sheet Metal Stamping Facility"
+        if 6 <= row <= 7 and col <= 3:
+            return "Industrial Worker Canteen & Transit Hub"
+        if row >= 8 and col <= 4:
+            return "Pavana River Riparian Buffer"
+        if row >= 7 and col >= 6:
+            return "Spine Road Logistics Terminal"
+        return "MIDC Industrial Unit"
+
+    if "mumbai" in sid or "bkc" in sid:
+        if 4 <= row <= 6 and 3 <= col <= 6:
+            return "BKC Financial G-Block Commercial Promenade"
+        if row <= 2 and col <= 3:
+            return "Kalanagar Transit Interchange"
+        if row >= 7 and col <= 3:
+            return "Mithi River Tidal Catchment Verge"
+        if row >= 7 and col >= 7:
+            return "MMRDA Exhibition Grounds"
+        return "BKC Corporate High-Rise Core"
+
+    if "pune" in sid:
+        if 4 <= row <= 6 and 3 <= col <= 6:
+            return "FC Road Commercial Pedestrian Corridor"
+        if row <= 2 and col <= 3:
+            return "Shivaji Nagar Metro Transit Hub"
+        if row >= 7 and col <= 4:
+            return "Mutha Riverfront Green Promenade"
+        return "Pune Central Mixed-Use Quarter"
+
+    if "nashik" in sid:
+        if 4 <= row <= 6 and 3 <= col <= 6:
+            return "Godavari Riverfront Promenade"
+        if row <= 2 and col <= 3:
+            return "CBS Bus Terminus Transit Corridor"
+        if row >= 7 and col >= 6:
+            return "Ambad Industrial Estate Edge Buffer"
+        return "Nashik Old City Cultural Precinct"
+
+    # Default / Bengaluru East Campus Demo
     if row <= 1 and 3 <= col <= 6:
         return "Hot Parking Area (Zone A)"
-    # Zone B: Green spaces with connectivity gap (left side)
     if 2 <= row <= 4 and col <= 2:
         return "North Green Patch (Zone B)"
     if 6 <= row <= 8 and col <= 2:
         return "South Green Patch (Zone B)"
-    # Zone C: High pedestrian exposure (central corridor)
     if 3 <= row <= 6 and 3 <= col <= 6:
         return "Central Walkway (Zone C)"
-    # Zone D: Hot paved surfaces (right side)
     if row <= 3 and col >= 7:
         return "East Service Road (Zone D)"
     if 4 <= row <= 6 and col >= 7:
         return "Loading Bay (Zone D)"
-    # Zone E: Existing green space
     if row >= 7 and 3 <= col <= 6:
         return "Garden Edge (Zone E)"
     if row >= 7 and col >= 7:
@@ -89,35 +185,83 @@ def _named_zone(row: int, col: int, rows: int, cols: int) -> str:
     return "Academic Block"
 
 
-def _cell_context(row: int, col: int, rows: int, cols: int) -> dict:
-    """Determine land use, surface type, and capacity based on position."""
-    # Zone A: Hot parking
+def _cell_context(row: int, col: int, rows: int, cols: int, study_id: str = "") -> dict:
+    """Determine land use, surface type, and capacity based on position and study area."""
+    sid = study_id.lower()
+
+    if "delhi" in sid:
+        # Central Vista / Kartavya Path
+        if 4 <= row <= 5 and 3 <= col <= 6:
+            return {"land_use": LandUse.GREEN_SPACE, "surface_type": SurfaceType.GREEN, "capacity": 4}
+        # Connaught Place outer radial
+        if row <= 1 and 3 <= col <= 6:
+            return {"land_use": LandUse.PEDESTRIAN_ZONE, "surface_type": SurfaceType.MIXED, "capacity": 4}
+        # National museum / Secretariat buildings
+        if (2 <= row <= 3 and 3 <= col <= 6) or (3 <= row <= 5 and col <= 2):
+            return {"land_use": LandUse.BUILDING, "surface_type": SurfaceType.BUILDING, "capacity": 0}
+        # India Gate lawns
+        if 4 <= row <= 6 and col >= 7:
+            return {"land_use": LandUse.GREEN_SPACE, "surface_type": SurfaceType.GREEN, "capacity": 5}
+        # Janpath commercial walkway
+        if 6 <= row <= 8 and col <= 2:
+            return {"land_use": LandUse.PEDESTRIAN_ZONE, "surface_type": SurfaceType.PAVED, "capacity": 3}
+        # Central Vista Canal & Lawns
+        if row >= 7 and 3 <= col <= 6:
+            return {"land_use": LandUse.GREEN_SPACE, "surface_type": SurfaceType.SOIL, "capacity": 4}
+        # Shahjahan Road
+        if row >= 7 and col >= 7:
+            return {"land_use": LandUse.GREEN_SPACE, "surface_type": SurfaceType.GREEN, "capacity": 5}
+        # Roads / Avenues
+        if row <= 2 and col >= 7:
+            return {"land_use": LandUse.ROAD, "surface_type": SurfaceType.PAVED, "capacity": 2}
+        return {"land_use": LandUse.MIXED, "surface_type": SurfaceType.MIXED, "capacity": 3}
+
+    if "pimpri" in sid or "bhosari" in sid:
+        # MIDC foundry / fab yards
+        if (row <= 1 and 3 <= col <= 6) or (row <= 2 and col >= 7):
+            return {"land_use": LandUse.PARKING, "surface_type": SurfaceType.PAVED, "capacity": 3}
+        # Highway verge
+        if row <= 2 and col <= 2:
+            return {"land_use": LandUse.ROAD, "surface_type": SurfaceType.PAVED, "capacity": 2}
+        # Industrial fabrication plants
+        if (2 <= row <= 3 and 3 <= col <= 6) or (5 <= row <= 7 and col >= 7):
+            return {"land_use": LandUse.BUILDING, "surface_type": SurfaceType.BUILDING, "capacity": 0}
+        # Telco road green buffer
+        if 3 <= row <= 5 and col <= 2:
+            return {"land_use": LandUse.GREEN_SPACE, "surface_type": SurfaceType.GREEN, "capacity": 4}
+        # MSETCL 220kV HT corridor
+        if 4 <= row <= 6 and 4 <= col <= 7:
+            return {"land_use": LandUse.MIXED, "surface_type": SurfaceType.SOIL, "capacity": 2}
+        # Canteen transit hub
+        if 6 <= row <= 7 and col <= 3:
+            return {"land_use": LandUse.PEDESTRIAN_ZONE, "surface_type": SurfaceType.MIXED, "capacity": 3}
+        # Pavana River buffer
+        if row >= 8 and col <= 4:
+            return {"land_use": LandUse.GREEN_SPACE, "surface_type": SurfaceType.SOIL, "capacity": 4}
+        # Spine road logistics
+        if row >= 7 and col >= 6:
+            return {"land_use": LandUse.PARKING, "surface_type": SurfaceType.PAVED, "capacity": 4}
+        return {"land_use": LandUse.MIXED, "surface_type": SurfaceType.PAVED, "capacity": 2}
+
+    # Default / Bengaluru East Campus Demo
     if row <= 1 and 3 <= col <= 6:
         return {"land_use": LandUse.PARKING, "surface_type": SurfaceType.PAVED, "capacity": 3}
-    # Zone B: Green patches
     if (2 <= row <= 4 and col <= 2) or (6 <= row <= 8 and col <= 2):
         return {"land_use": LandUse.GREEN_SPACE, "surface_type": SurfaceType.GREEN, "capacity": 5}
-    # Zone C: Central walkway
     if 3 <= row <= 6 and 3 <= col <= 6:
         return {"land_use": LandUse.PEDESTRIAN_ZONE, "surface_type": SurfaceType.MIXED, "capacity": 4}
-    # Zone D: Service road / paved
     if row <= 3 and col >= 7:
         return {"land_use": LandUse.ROAD, "surface_type": SurfaceType.PAVED, "capacity": 2}
     if 4 <= row <= 6 and col >= 7:
         return {"land_use": LandUse.PARKING, "surface_type": SurfaceType.PAVED, "capacity": 3}
-    # Zone E: Garden
     if row >= 7 and 3 <= col <= 6:
         return {"land_use": LandUse.GREEN_SPACE, "surface_type": SurfaceType.GREEN, "capacity": 5}
-    # Sports ground
     if row >= 7 and col >= 7:
         return {"land_use": LandUse.SPORTS, "surface_type": SurfaceType.MIXED, "capacity": 3}
-    # Academic buildings
     if 2 <= row <= 3 and 3 <= col <= 6:
         return {"land_use": LandUse.BUILDING, "surface_type": SurfaceType.BUILDING, "capacity": 0}
-    # North gate
     if row <= 1 and col <= 2:
         return {"land_use": LandUse.PEDESTRIAN_ZONE, "surface_type": SurfaceType.MIXED, "capacity": 4}
-    # Library
     if 5 <= row <= 6 and col <= 2:
         return {"land_use": LandUse.RESIDENTIAL, "surface_type": SurfaceType.MIXED, "capacity": 3}
     return {"land_use": LandUse.MIXED, "surface_type": SurfaceType.MIXED, "capacity": 3}
@@ -219,16 +363,18 @@ def generate_grid(
 
     All data is SYNTHETIC / DEMO.
     """
-    rng = _seeded_rng(seed)
+    actual_seed = _study_seed(study_id, seed) if seed == 20261010 else seed
+    rng = _seeded_rng(actual_seed)
 
     # Generate study area boundary
     boundary = generate_study_area_boundary(
         origin_lat, origin_lng, rows, cols, cell_size_lat, cell_size_lng
     )
 
-    # Set up CRS transformer for area calculations
-    transformer_to_proj = Transformer.from_crs(WGS84, PROJECTED_CRS, always_xy=True)
-    transformer_to_geo = Transformer.from_crs(PROJECTED_CRS, WGS84, always_xy=True)
+    # Set up CRS transformer for area calculations in appropriate UTM projection
+    target_crs = get_projected_crs(origin_lng, origin_lat)
+    transformer_to_proj = Transformer.from_crs(WGS84, target_crs, always_xy=True)
+    transformer_to_geo = Transformer.from_crs(target_crs, WGS84, always_xy=True)
 
     cells: list[CellResponse] = []
     half_lat = cell_size_lat / 2
@@ -264,8 +410,8 @@ def generate_grid(
             cell_id = f"{_row_label(row)}{str(col + 1).padStart(2, '0') if hasattr(str, 'padStart') else str(col + 1).zfill(2)}"
 
             # Get zone context
-            context = _cell_context(row, col, rows, cols)
-            zone_name = _named_zone(row, col, rows, cols)
+            context = _cell_context(row, col, rows, cols, study_id=study_id)
+            zone_name = _named_zone(row, col, rows, cols, study_id=study_id)
 
             # Generate environmental scores
             scores = _generate_scores(row, col, rows, cols, context, rng)

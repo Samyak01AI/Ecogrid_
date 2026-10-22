@@ -36,7 +36,8 @@ export const api = {
   importScores: (input: { studyId: string; format: 'csv' | 'geojson'; content: string }) => request<{ imported: number; format: 'csv' | 'geojson'; cells: number; persistence: 'database' | 'process-memory' }>('/api/import', { method: 'POST', body: JSON.stringify(input) }),
   createScenario: (input: { studyId: string; name: string; description?: string; budget: number; weights: ScoreWeights; enabledInterventions: readonly InterventionId[] }) => request<Scenario>('/api/scenarios', { method: 'POST', body: JSON.stringify(input) }),
   compareScenarios: (input: { studyId: string; scenarioIds?: readonly string[]; budget?: number; weights?: ScoreWeights }) => request<{ scenarios: unknown[]; delta: { cost: number; benefit: number; cells: number } }>('/api/scenarios/compare', { method: 'POST', body: JSON.stringify(input) }),
-  report: (studyId: string, format: 'json' | 'pdf' = 'json') => fetch(`/api/studies/${encodeURIComponent(studyId)}/report?format=${format}`, { credentials: 'include' }),
+  report: (studyId: string, format: 'json' | 'pdf' = 'json', budget?: number) =>
+    fetch(`/api/studies/${encodeURIComponent(studyId)}/report?format=${format}${budget != null ? `&budget=${encodeURIComponent(budget)}` : ''}`, { credentials: 'include' }),
   exportUrl: (studyId: string, format: 'csv' | 'geojson') => `/api/export?studyId=${encodeURIComponent(studyId)}&format=${format}`,
 
   // Stage 1-6 Architectural Evolution Endpoints
@@ -95,5 +96,99 @@ export const api = {
         blended: string;
       };
     }>('/api/cv/segment-cell', { method: 'POST', body: JSON.stringify(input) }),
+
+  // Stage 7: AI Planning Assistant & Multi-Key Grok Pool
+  aiStatus: () => request<AIPoolStatus>('/api/ai/status'),
+  aiAssistant: (input: { studyId?: string; cellId: string; question?: string; planId?: string; cell?: unknown; plan?: unknown }) =>
+    request<AIAssistantResponse>('/api/ai/assistant', { method: 'POST', body: JSON.stringify(input) }),
+  aiScenarioExplain: (input: { studyId?: string; baseline: unknown; proposal: unknown; delta?: unknown }) =>
+    request<AIScenarioExplainResponse>('/api/ai/scenario-explain', { method: 'POST', body: JSON.stringify(input) }),
+  aiImpactSummary: (input: { studyId?: string; budget?: number; plan: unknown }) =>
+    request<AIImpactSummaryResponse>('/api/ai/impact-summary', { method: 'POST', body: JSON.stringify(input) }),
+  aiValidatePlan: (input: { studyId?: string; budget?: number; plan: unknown }) =>
+    request<AIValidatePlanResponse>('/api/ai/validate-plan', { method: 'POST', body: JSON.stringify(input) }),
+};
+
+export type AIPoolStatus = {
+  total_keys: number;
+  active_key_index: number | null;
+  healthy_count: number;
+  cooldown_count: number;
+  total_failover_switches: number;
+  default_model: string;
+  base_url: string;
+  keys: Array<{
+    index: number;
+    masked_key: string;
+    status: 'HEALTHY' | 'COOLDOWN' | 'ERROR';
+    cooldown_remaining_sec: number;
+    request_count: number;
+    failover_count: number;
+    last_error: string | null;
+  }>;
+};
+
+export type AIAssistantResponse = {
+  answer: string;
+  question: string;
+  cellId: string;
+  areaName: string;
+  ai_metadata: {
+    provider: string;
+    model: string;
+    key_index: number;
+    total_keys: number;
+    failover_count: number;
+  };
+};
+
+export type AIScenarioExplainResponse = {
+  explanation: string;
+  deltas: {
+    budget_delta: number;
+    cost_delta: number;
+    benefit_delta: number;
+    cells_delta: number;
+  };
+  ai_metadata: {
+    provider: string;
+    model: string;
+    key_index: number;
+    total_keys: number;
+    failover_count: number;
+  };
+};
+
+export type AIImpactSummaryResponse = {
+  summary_markdown: string;
+  study_name: string;
+  metrics: {
+    total_cost: number;
+    budget: number;
+    cells_improved: number;
+    combined_benefit: number;
+    efficiency_gain_pct: number;
+  };
+  ai_metadata: {
+    provider: string;
+    model: string;
+    key_index: number;
+    total_keys: number;
+    failover_count: number;
+  };
+};
+
+export type AIValidatePlanResponse = {
+  validation_report: string;
+  backend_enforced: boolean;
+  is_valid: boolean;
+  violations: Array<Record<string, unknown>>;
+  ai_metadata: {
+    provider: string;
+    model: string;
+    key_index: number;
+    total_keys: number;
+    failover_count: number;
+  };
 };
 

@@ -94,7 +94,23 @@ function ResizeAndFit({ bounds }: { bounds: L.LatLngBoundsExpression }): null {
       if (Number.isFinite(lat) && Number.isFinite(lng) && Number.isFinite(zoom) && zoom >= 2 && zoom <= 20) map.setView([lat, lng], zoom, { animate: false });
       else map.fitBounds(bounds, { padding: [20, 20], maxZoom: 17, animate: false });
     });
-    return () => { observer.disconnect(); window.cancelAnimationFrame(frame); };
+    const handleCenter = (event: Event) => {
+      const detail = (event as CustomEvent<{ lat: number; lng: number; zoom?: number }>).detail;
+      if (detail && Number.isFinite(detail.lat) && Number.isFinite(detail.lng)) {
+        map.setView([detail.lat, detail.lng], detail.zoom ?? 18, { animate: true });
+      }
+    };
+    const handleReset = () => {
+      map.fitBounds(bounds, { padding: [20, 20], maxZoom: 17, animate: true });
+    };
+    window.addEventListener('ecogrid-center-map', handleCenter);
+    window.addEventListener('ecogrid-reset-map', handleReset);
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('ecogrid-center-map', handleCenter);
+      window.removeEventListener('ecogrid-reset-map', handleReset);
+    };
   }, [bounds, boundsKey, map]);
   return null;
 }

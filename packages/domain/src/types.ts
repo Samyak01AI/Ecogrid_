@@ -39,6 +39,16 @@ export interface Cell {
   priorityZone: boolean;
   dataConfidence: number;
   capacity: number;
+  treeSuitability?: number;
+  availableArea?: number;
+  builtSurfaceRatio?: number;
+  undergroundClearance?: number;
+  roadClearance?: number;
+  observationDate?: string;
+  dataLabel?: string;
+  dataSource?: string;
+  dataStatus?: string;
+  provenanceFlags?: readonly string[];
 }
 
 export type InterventionId = 'native_trees' | 'shade_structure' | 'pollinator_corridor' | 'green_buffer' | 'cool_surface';

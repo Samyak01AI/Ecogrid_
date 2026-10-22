@@ -53,6 +53,31 @@ function candidateFor(cell: Cell, intervention: Intervention, weights: Optimizer
 }
 
 function infeasibilityReason(cell: Cell, intervention: Intervention, minimum: number): string | undefined {
+  const flags = cell.provenanceFlags ?? [];
+  if (flags.includes('WATER_BODY_VETO') || cell.areaName.includes('Water') || cell.areaName.includes('River') || cell.areaName.includes('Canal')) {
+    return 'Water body buffer veto: terrestrial construction strictly prohibited';
+  }
+  if (flags.includes('OVERHEAD_HT_RESTRICTION') || cell.areaName.includes('High-Tension') || cell.areaName.includes('HT-Line')) {
+    if (intervention.id === 'native_trees' || intervention.id === 'shade_structure') {
+      return 'Overhead 220kV HT transmission corridor violation: trees and tall structures prohibited';
+    }
+  }
+  if (flags.includes('HERITAGE_RESTRICTION') || cell.areaName.includes('Heritage')) {
+    if (intervention.id === 'shade_structure' || intervention.id === 'cool_surface') {
+      return 'Central Vista heritage sightline preservation: high-profile shade and reflective surfaces restricted';
+    }
+  }
+  if (flags.includes('AVIATION_OLS_RESTRICTION') || cell.areaName.includes('Runway')) {
+    if (intervention.id === 'native_trees' || intervention.id === 'shade_structure') {
+      return 'Aviation obstacle limitation surface (OLS): vertical structures prohibited';
+    }
+  }
+  if (cell.undergroundClearance != null && cell.undergroundClearance < 3.0 && intervention.id === 'native_trees') {
+    return `Underground utility clearance (${cell.undergroundClearance.toFixed(1)} m) below mandatory 3.0 m safety buffer`;
+  }
+  if (cell.roadClearance != null && cell.roadClearance < 2.5 && intervention.id === 'native_trees') {
+    return `Roadway sightline setback (${cell.roadClearance.toFixed(1)} m) below mandatory 2.5 m vehicular safety buffer`;
+  }
   if (!intervention.allowedLandUses.includes(cell.landUse)) return `Not allowed for ${cell.landUse.replaceAll('_', ' ')} land use`;
   if (!intervention.allowedSurfaces.includes(cell.surfaceType)) return `Requires ${intervention.allowedSurfaces.join(' or ')} surface`;
   if (cell.scores.feasibility < Math.max(intervention.minimumFeasibility, minimum)) return `Feasibility ${Math.round(cell.scores.feasibility * 100)}% is below the required threshold`;

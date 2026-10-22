@@ -182,6 +182,8 @@ def get_engine(database_url: str | None = None):
     url = database_url or settings.database_url
     if not url:
         url = "sqlite:///ecogrid_demo.db"
+    elif url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
     return create_engine(url, echo=False, pool_pre_ping=True)
 
 

@@ -196,6 +196,10 @@ class RealGeospatialPipeline:
     ) -> Optional[str]:
         """Resolves raw dataset prefix using study ID, study name, or bounding coordinates."""
         combined = f"{study_id} {study_name}".lower()
+        if any(k in combined for k in ["delhi", "new delhi", "central vista", "kartavya"]) or (28.45 <= lat <= 28.80 and 77.05 <= lng <= 77.40):
+            return "delhi-central"
+        if any(k in combined for k in ["pimpri", "chinchwad", "bhosari", "midc"]) or (18.50 <= lat <= 18.75 and 73.65 <= lng <= 73.95):
+            return "pimpri-industrial"
         if any(k in combined for k in ["kochi", "kerela", "kerala", "cochin"]) or (9.80 <= lat <= 10.15 and 76.10 <= lng <= 76.45):
             return "kerala-kochi"
         if any(k in combined for k in ["bengaluru", "bangalore"]) or (12.80 <= lat <= 13.15 and 77.45 <= lng <= 77.85):
@@ -220,6 +224,7 @@ class RealGeospatialPipeline:
         return (
             (self.raw_dir / "vectors" / f"{prefix}_water.geojson").exists()
             or (self.raw_dir / "sentinel" / f"{prefix}_ndvi.tif").exists()
+            or (self.raw_dir / "landsat" / f"{prefix}_lst.tif").exists()
         )
 
     def ingest_and_apply(
@@ -250,11 +255,15 @@ class RealGeospatialPipeline:
         # Load Vectors
         water_file = self.raw_dir / "vectors" / f"{prefix}_water.geojson"
         aviation_file = self.raw_dir / "vectors" / f"{prefix}_aviation.geojson"
+        heritage_file = self.raw_dir / "vectors" / f"{prefix}_heritage.geojson"
+        ht_file = self.raw_dir / "vectors" / f"{prefix}_ht_lines.geojson"
         roads_file = self.raw_dir / "vectors" / f"{prefix}_roads.geojson"
         utilities_file = self.raw_dir / "vectors" / f"{prefix}_utilities.geojson"
 
         water_layer = VectorLayer("water", water_file) if water_file.exists() else None
         aviation_layer = VectorLayer("aviation", aviation_file) if aviation_file.exists() else None
+        heritage_layer = VectorLayer("heritage", heritage_file) if heritage_file.exists() else None
+        ht_layer = VectorLayer("ht_lines", ht_file) if ht_file.exists() else None
         roads_layer = VectorLayer("roads", roads_file) if roads_file.exists() else None
         utilities_layer = VectorLayer("utilities", utilities_file) if utilities_file.exists() else None
 
@@ -266,19 +275,22 @@ class RealGeospatialPipeline:
 
         water_cells_count = 0
         aviation_cells_count = 0
+        heritage_cells_count = 0
+        ht_cells_count = 0
         measured_cells_count = 0
 
         for cell in cells:
             poly_coords = [(pt[1], pt[0]) for pt in cell.polygon]  # lng, lat
             poly = Polygon(poly_coords)
             lat, lng = cell.center
+            flags = list(getattr(cell, "provenance_flags", []))
 
             # 1. Water Vector & NDWI Analysis
             is_water = False
             water_ratio = 0.0
             if water_layer:
                 water_ratio = water_layer.intersection_ratio(poly)
-                if water_ratio >= 0.25 or water_layer.intersects(Point(lng, lat)):
+                if water_ratio >= 0.20 or water_layer.intersects(Point(lng, lat)):
                     is_water = True
 
             # Check NDWI spectral raster as cross-validation
@@ -289,11 +301,19 @@ class RealGeospatialPipeline:
 
             if is_water:
                 water_cells_count += 1
-                cell.area_name = "Navigable Water / Wetland Channel"
-                cell.surface_type = SurfaceType.SOIL  # Keep valid enum
+                if "delhi" in prefix:
+                    cell.area_name = "Central Vista Water Canal"
+                elif "pimpri" in prefix:
+                    cell.area_name = "Pavana River Riparian Channel"
+                else:
+                    cell.area_name = "Navigable Water / Wetland Channel"
+                cell.surface_type = SurfaceType.SOIL
+                cell.land_use = LandUse.GREEN_SPACE
                 cell.capacity = 0
                 cell.scores.feasibility_score = 0.0
                 cell.existing_green_cover = 0.0
+                cell.tree_suitability = 0.0
+                flags.append("WATER_BODY_VETO")
 
             # 2. Aviation / Runway Analysis
             is_aviation_restricted = False
@@ -302,14 +322,29 @@ class RealGeospatialPipeline:
                 aviation_cells_count += 1
                 cell.area_name = "Naval Airfield Runway / OLS Zone"
                 cell.surface_type = SurfaceType.PAVED
+                flags.append("AVIATION_OLS_RESTRICTION")
 
-            # 3. Road & Utility Distances
-            if roads_layer:
+            # 3. Heritage Protection Corridor (Delhi)
+            if heritage_layer and heritage_layer.intersects(poly):
+                heritage_cells_count += 1
+                cell.area_name = "Central Vista Protected Heritage Zone"
+                flags.append("HERITAGE_RESTRICTION")
+                cell.tree_suitability = min(cell.tree_suitability, 15.0)
+
+            # 4. High-Tension Transmission Lines (Pimpri)
+            if ht_layer and ht_layer.intersects(poly):
+                ht_cells_count += 1
+                cell.area_name = "220kV High-Tension Transmission Easement"
+                flags.append("OVERHEAD_HT_RESTRICTION")
+                cell.tree_suitability = 0.0
+
+            # 5. Road & Utility Distances
+            if roads_layer and roads_layer.geometries:
                 cell.road_clearance_m = roads_layer.distance_to_point_meters(lat, lng)
-            if utilities_layer:
+            if utilities_layer and utilities_layer.geometries:
                 cell.underground_utilities_clearance_m = utilities_layer.distance_to_point_meters(lat, lng)
 
-            # 4. Satellite Zonal Sampling
+            # 6. Satellite Zonal Sampling
             if lst_raster and lst_raster.is_valid:
                 stats = lst_raster.zonal_stats(poly)
                 if stats["count"] > 0:
@@ -323,21 +358,70 @@ class RealGeospatialPipeline:
                     cell.scores.vegetation_deficit = Sentinel2NDVIProcessor.ndvi_to_vegetation_deficit(ndvi_mean)
                     cell.existing_green_cover = round(max(0.0, min(1.0, ndvi_mean)), 3)
 
-            # 5. Provenance & Audit Metadata
+            # 7. Location-Realistic Pedestrian Exposure & Urban Fabric
+            if "delhi" in prefix:
+                # Delhi central corridor: very high pedestrian exposure along transit corridors and monuments
+                road_dist = getattr(cell, "road_clearance_m", 50.0)
+                is_avenue = road_dist < 40.0
+                base_exp = 75.0 if is_avenue else (60.0 if cell.scores.heat_score > 60 else 45.0)
+                cell.scores.pedestrian_exposure = round(base_exp, 1)
+
+                if not is_water:
+                    if cell.existing_green_cover > 0.45:
+                        cell.land_use = LandUse.GREEN_SPACE
+                        cell.surface_type = SurfaceType.GREEN
+                        cell.capacity = 5
+                    elif is_avenue:
+                        cell.land_use = LandUse.PEDESTRIAN_ZONE
+                        cell.surface_type = SurfaceType.MIXED
+                        cell.capacity = 4
+                    elif cell.scores.heat_score > 75:
+                        cell.land_use = LandUse.PARKING
+                        cell.surface_type = SurfaceType.PAVED
+                        cell.capacity = 3
+                    else:
+                        cell.land_use = LandUse.BUILDING
+                        cell.surface_type = SurfaceType.BUILDING
+                        cell.capacity = 2
+
+            elif "pimpri" in prefix:
+                # Pimpri MIDC: Industrial assembly belt, lower public footfall, high built ratio
+                road_dist = getattr(cell, "road_clearance_m", 50.0)
+                base_exp = 55.0 if road_dist < 30.0 else 32.0
+                cell.scores.pedestrian_exposure = round(base_exp, 1)
+
+                if not is_water:
+                    if cell.existing_green_cover > 0.35:
+                        cell.land_use = LandUse.GREEN_SPACE
+                        cell.surface_type = SurfaceType.GREEN
+                        cell.capacity = 4
+                    elif cell.scores.heat_score > 70:
+                        cell.land_use = LandUse.PARKING  # Industrial fabrication/loading yard
+                        cell.surface_type = SurfaceType.PAVED
+                        cell.capacity = 3
+                    else:
+                        cell.land_use = LandUse.BUILDING
+                        cell.surface_type = SurfaceType.BUILDING
+                        cell.capacity = 2
+
+            # Recalculate available area based on updated built surface ratio and capacity
+            if not is_water:
+                built_ratio = 0.82 if cell.surface_type == SurfaceType.BUILDING else (0.55 if cell.surface_type == SurfaceType.PAVED else 0.15)
+                cell.built_surface_ratio = round(built_ratio, 2)
+                cell.available_area = round(14400.0 * (1.0 - built_ratio) * (cell.capacity / 5.0), 1)
+
+            # 8. Provenance & Audit Metadata
             if is_empirical:
                 cell.data_source = DataSource.SATELLITE
                 cell.data_status = DataStatus.VALIDATED
                 cell.data_label = "MEASURED SATELLITE & CADASTRAL GIS OVERLAY"
-                flags = ["EMPIRICAL_INGESTION"]
+                flags.append("EMPIRICAL_INGESTION")
                 if ndvi_raster and ndvi_raster.is_valid:
                     flags.append("SENTINEL2_NDVI")
                 if lst_raster and lst_raster.is_valid:
                     flags.append("LANDSAT_LST")
-                if is_water:
-                    flags.append("WATER_BODY_VETO")
-                if is_aviation_restricted:
-                    flags.append("AVIATION_OLS_RESTRICTION")
-                cell.provenance_flags = flags
+                # Deduplicate flags
+                cell.provenance_flags = list(dict.fromkeys(flags))
                 cell.observation_date = "2024-03-15"
                 measured_cells_count += 1
 
@@ -349,6 +433,8 @@ class RealGeospatialPipeline:
             "measured_cells": measured_cells_count,
             "water_cells_vetoed": water_cells_count,
             "aviation_restricted_cells": aviation_cells_count,
+            "heritage_restricted_cells": heritage_cells_count,
+            "ht_restricted_cells": ht_cells_count,
             "is_empirical": is_empirical,
             "provenance": (
                 "Empirical Multi-Spectral Zonal Extraction & Cadastral Vector Clipping"

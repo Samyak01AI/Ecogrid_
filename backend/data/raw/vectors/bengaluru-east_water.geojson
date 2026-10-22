@@ -1,0 +1,40 @@
+{
+  "type": "FeatureCollection",
+  "name": "Bellandur Wetland Fringe",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Bellandur Lake Wetland Fringe",
+        "type": "wetland"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              77.6315,
+              12.928
+            ],
+            [
+              77.645,
+              12.928
+            ],
+            [
+              77.645,
+              12.9325
+            ],
+            [
+              77.6315,
+              12.9325
+            ],
+            [
+              77.6315,
+              12.928
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

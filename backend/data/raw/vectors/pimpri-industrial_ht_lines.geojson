@@ -1,0 +1,40 @@
+{
+  "type": "FeatureCollection",
+  "name": "MSETCL 220kV High-Tension Transmission Easement",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Bhosari 220kV Transmission Corridor",
+        "restriction": "tall_trees_prohibited"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.791,
+              18.624
+            ],
+            [
+              73.794,
+              18.624
+            ],
+            [
+              73.794,
+              18.64
+            ],
+            [
+              73.791,
+              18.64
+            ],
+            [
+              73.791,
+              18.624
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

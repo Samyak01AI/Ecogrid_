@@ -1,0 +1,40 @@
+{
+  "type": "FeatureCollection",
+  "name": "Central Vista Protected Heritage Buffer",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Central Vista Axis Heritage Buffer",
+        "restriction": "heritage_canopy_restricted"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              77.214,
+              28.618
+            ],
+            [
+              77.2195,
+              28.618
+            ],
+            [
+              77.2195,
+              28.6225
+            ],
+            [
+              77.214,
+              28.6225
+            ],
+            [
+              77.214,
+              28.618
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

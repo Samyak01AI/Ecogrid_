@@ -1,6 +1,6 @@
 {
   "status": "trained_and_benchmarked",
-  "timestamp": "2026-10-21T16:48:49.227860+00:00",
+  "timestamp": "2026-10-22T17:01:52.170336+00:00",
   "selected_model": "xgboost",
   "champion_pipeline": "CalibratedClassifierCV",
   "baseline_accuracy": 0.6675,
@@ -17,7 +17,7 @@
       "balanced_accuracy": 0.6685,
       "brier_score": 0.2106,
       "spatial_cv_macro_f1": "0.7307 \u00b1 0.0091",
-      "train_time_ms": 28.41
+      "train_time_ms": 26.16
     },
     "random_forest": {
       "name": "Random Forest Calibrated Pipeline",
@@ -28,7 +28,7 @@
       "balanced_accuracy": 0.9444,
       "brier_score": 0.0521,
       "spatial_cv_macro_f1": "0.9332 \u00b1 0.014",
-      "train_time_ms": 865.75
+      "train_time_ms": 861.13
     },
     "xgboost": {
       "name": "XGBoost Calibrated Pipeline",
@@ -39,7 +39,7 @@
       "balanced_accuracy": 0.9494,
       "brier_score": 0.0453,
       "spatial_cv_macro_f1": "0.9397 \u00b1 0.0068",
-      "train_time_ms": 292.32
+      "train_time_ms": 292.26
     }
   },
   "spatial_holdout_test": {

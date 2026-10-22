@@ -183,6 +183,28 @@ def _generate_candidates(
 
 def _check_eligibility(cell: CellResponse, intervention) -> Optional[str]:
     """Check hard eligibility constraints. Returns rejection reason or None."""
+    # 1. Location-specific statutory & environmental restrictions
+    flags = getattr(cell, "provenance_flags", []) or []
+    
+    # Water Body Veto: strictly prohibits any terrestrial interventions
+    if "WATER_BODY_VETO" in flags:
+        return "Water body buffer veto: terrestrial construction strictly prohibited"
+
+    # Overhead 220kV High-Tension Line easement (e.g. Pimpri): prohibits tall canopies and structures
+    if "OVERHEAD_HT_RESTRICTION" in flags:
+        if intervention.intervention_id in [InterventionId.NATIVE_TREES, InterventionId.SHADE_STRUCTURE]:
+            return "Overhead 220kV HT line clearance violation: trees and tall structures prohibited within transmission corridor"
+
+    # Heritage Sightline Protection (e.g. Central Vista Delhi): prohibits shade structures / view obstruction
+    if "HERITAGE_RESTRICTION" in flags:
+        if intervention.intervention_id in [InterventionId.SHADE_STRUCTURE, InterventionId.COOL_SURFACE]:
+            return "Central Vista heritage sightline preservation: high-profile shade or artificial reflective surfaces restricted"
+
+    # Aviation Obstacle Limitation Surface (OLS)
+    if "AVIATION_OLS_RESTRICTION" in flags:
+        if intervention.intervention_id in [InterventionId.NATIVE_TREES, InterventionId.SHADE_STRUCTURE]:
+            return "Aviation obstacle limitation surface (OLS): vertical structures and trees strictly prohibited"
+
     if cell.surface_type not in intervention.allowed_surfaces:
         return f"Requires {', '.join(s.value for s in intervention.allowed_surfaces)} surface"
     if cell.land_use not in intervention.allowed_land_uses:

@@ -1,0 +1,39 @@
+{
+  "type": "FeatureCollection",
+  "name": "Pimpri Industrial Corridors",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Telco Heavy Transport Way"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.795,
+              18.625
+            ],
+            [
+              73.797,
+              18.625
+            ],
+            [
+              73.797,
+              18.638
+            ],
+            [
+              73.795,
+              18.638
+            ],
+            [
+              73.795,
+              18.625
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

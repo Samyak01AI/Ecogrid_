@@ -1,0 +1,72 @@
+{
+  "type": "FeatureCollection",
+  "name": "Delhi Central Arterials",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Janpath Road Corridor"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              77.2165,
+              28.612
+            ],
+            [
+              77.2185,
+              28.612
+            ],
+            [
+              77.2185,
+              28.628
+            ],
+            [
+              77.2165,
+              28.628
+            ],
+            [
+              77.2165,
+              28.612
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Kartavya Path Promenade"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              77.208,
+              28.6138
+            ],
+            [
+              77.23,
+              28.6138
+            ],
+            [
+              77.23,
+              28.6158
+            ],
+            [
+              77.208,
+              28.6158
+            ],
+            [
+              77.208,
+              28.6138
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

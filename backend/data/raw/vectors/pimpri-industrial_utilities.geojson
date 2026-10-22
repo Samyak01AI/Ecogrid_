@@ -1,0 +1,40 @@
+{
+  "type": "FeatureCollection",
+  "name": "Pimpri Industrial Effluent & Natural Gas Mains",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "MIDC High-Pressure Gas Grid",
+        "depth_m": 3.8
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.788,
+              18.628
+            ],
+            [
+              73.801,
+              18.628
+            ],
+            [
+              73.801,
+              18.631
+            ],
+            [
+              73.788,
+              18.631
+            ],
+            [
+              73.788,
+              18.628
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

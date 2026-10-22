@@ -14,10 +14,18 @@ import {
 } from '@ecogrid/domain';
 import { api, type Scenario, type UserSession } from './api.js';
 import { useEcoStore } from './useEcoStore.js';
+import {
+  AIPlanningAssistant,
+  AIScenarioExplainer,
+  AIImpactReportSummary,
+  AIValidationAssistant,
+} from './components/AIPlanningFeatures.js';
+import { CellInspector } from './components/CellInspector.js';
 
 const GridMap = lazy(() => import('./components/GridMap.js'));
 const ClimateCharts = lazy(() => import('./components/ClimateCharts.js'));
 const StudySetup = lazy(() => import('./components/StudySetup.js'));
+const ScenarioLabPage = lazy(() => import('./components/ScenarioLabPage.js'));
 
 const SECTIONS = [
   { group: 'WORKSPACE', items: [
@@ -102,16 +110,30 @@ function AppFrame() {
         const response = await api.studies();
         if (!active || response.studies.length === 0) return;
         setStudies(response.studies);
-        const requestedId = new URLSearchParams(window.location.search).get('study') ?? 'study-bengaluru-east';
+        const requestedId = new URLSearchParams(window.location.search).get('study') ?? 'study-delhi';
         const study = response.studies.find((item) => item.id === requestedId) ?? response.studies[0];
         if (!study) return;
         const data = await api.cells(study.id);
-        if (active) { setActiveStudyId(study.id); setCells(data.cells); }
+        if (active) {
+          setActiveStudyId(study.id);
+          setCells(data.cells);
+          try {
+            const optResult = await api.optimize({
+              studyId: study.id,
+              budget: 100000,
+              weights: { heat: 30, vegetation: 25, pedestrian: 25, connectivity: 20 },
+              enabledInterventions: initialInterventions,
+            });
+            if (active) setPlan(optResult);
+          } catch {
+            /* Handled by activePlan fallback */
+          }
+        }
       } catch { /* The deterministic local grid stays available when the API is offline. */ }
     };
     void load();
     return () => { active = false; };
-  }, [setActiveStudyId, setCells, setStudies]);
+  }, [setActiveStudyId, setCells, setPlan, setStudies]);
   useEffect(() => {
     const path = location.pathname;
     if (MAP_ROUTES.has(path)) {
@@ -187,9 +209,39 @@ function AppFrame() {
     setStudyLoading(true);
     try {
       const response = await api.cells(studyId);
-      setCells(response.cells); setActiveStudyId(studyId); setPlan(null); selectCell('', false); setStudyMenuOpen(false);
+      setCells(response.cells);
+      setActiveStudyId(studyId);
+      setPlan(null);
+      selectCell('', false);
+      setStudyMenuOpen(false);
+
+      // Trigger location-specific backend optimization
+      try {
+        const optResult = await api.optimize({
+          studyId,
+          budget,
+          weights,
+          enabledInterventions: initialInterventions,
+        });
+        setPlan(optResult);
+      } catch {
+        // activePlan useMemo will compute local fallback with response.cells
+      }
+
       pushToast(`Loaded ${response.study.name} · ${response.cells.length} cells.`, 'success');
-    } catch (error) { pushToast(error instanceof Error ? error.message : 'Could not load this study area.', 'error'); }
+
+      // Center MapLibre map on new study area
+      const origin = response.study?.origin;
+      if (origin && Array.isArray(origin) && origin.length === 2) {
+        window.dispatchEvent(
+          new CustomEvent('ecogrid-center-map', {
+            detail: { lat: origin[0], lng: origin[1], zoom: 16 },
+          })
+        );
+      }
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : 'Could not load this study area.', 'error');
+    }
     setStudyLoading(false);
   };
 
@@ -316,26 +368,97 @@ function AppFrame() {
           ) : (
             <span className="data-provenance-pill" style={{ marginLeft: 8, fontSize: '10px', padding: '2px 7px', borderRadius: '4px', background: 'rgba(234, 179, 8, 0.15)', color: '#eab308', border: '1px solid rgba(234, 179, 8, 0.3)', fontWeight: 600 }}>SYNTHETIC DEMO DATA</span>
           );
-        })()}</div>
+        })()}
+        </div>
         <div className="topbar-right"><div className="global-search"><Search size={15} /><input type="search" value={searchValue} onFocus={() => setSearchOpen(true)} onChange={(event) => setSearchValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && searchValue) { const match = cells.find((cell) => cell.id.toLowerCase() === searchValue.toLowerCase() || cell.areaName.toLowerCase().includes(searchValue.toLowerCase())); if (match) { navigate('/environment'); selectCell(match.id, false); } setSearchOpen(false); } }} aria-label="Search cells and areas" placeholder="Find a cell or area…" /><kbd>⌘ K</kbd>{searchOpen && searchValue && <div className="search-suggestions">{cells.filter((cell) => cell.id.toLowerCase().includes(searchValue.toLowerCase()) || cell.areaName.toLowerCase().includes(searchValue.toLowerCase())).slice(0, 5).map((cell) => <button key={cell.id} type="button" onClick={() => { navigate('/environment'); selectCell(cell.id, false); setSearchValue(cell.id); setSearchOpen(false); }}><b>{cell.id}</b><span>{cell.areaName}</span><i>{Math.round(combinedPriority(cell.scores) * 100)} priority</i></button>)}</div>}</div><button className="icon-button theme-toggle" title="Toggle light theme" aria-label="Toggle light theme" type="button" onClick={() => setLightTheme((value) => !value)}>{lightTheme ? <Sun size={17} /> : <CloudSun size={17} />}</button><button className="topbar-help" type="button" onClick={() => navigate('/methodology')} aria-label="Help and methodology"><CircleHelp size={17} /></button><Link to="/login" className={`topbar-user ${user ? 'has-user' : ''}`} aria-label={user ? `Signed in as ${user.email}` : 'Sign in'}><span>{user ? user.email.slice(0, 1).toUpperCase() : <UserRound size={15} />}</span></Link></div>
       </header>
       <div className={`page-body ${activeMap ? 'page-body-map' : ''}`}>
-        {activeMap && pageTitle && <SectionTitle eyebrow={pageTitle.eyebrow} title={pageTitle.title} subtitle={pageTitle.subtitle} actions={<><button className="button button-quiet" type="button" onClick={() => setComparisonOpen(true)}><GitCompareArrows size={15} /> Compare</button><button className="button button-primary" type="button" onClick={() => void handleOptimize()}><WandSparkles size={15} /> Optimize plan</button></>} />}
-        {activeMap && <div className="map-workspace"><div className="map-main-column">
-          <div className="study-meta-row"><div className="study-meta-location"><Globe2 size={14} /><span>{(activeStudy?.name ?? 'Bengaluru East Campus').toUpperCase()}</span><i>·</i><span>{activeStudy?.columns ?? 10} × {activeStudy?.rows ?? 10} GRID</span><i>·</i><span>{Math.abs(activeStudy?.origin[0] ?? 12.9352).toFixed(2)}° {(activeStudy?.origin[0] ?? 12.9352) < 0 ? 'S' : 'N'}, {Math.abs(activeStudy?.origin[1] ?? 77.6245).toFixed(2)}° {(activeStudy?.origin[1] ?? 77.6245) < 0 ? 'W' : 'E'}</span></div><div className="map-export-actions"><button className="download-inline" type="button" onClick={() => void handleShare()}><Share2 size={14} /> Share view</button><button className="download-inline" type="button" onClick={() => void handleExport('csv')}><Download size={14} /> CSV</button><button className="download-inline" type="button" onClick={() => void handleExport('geojson')}><Download size={14} /> GeoJSON</button><button className="download-inline" type="button" disabled={pngExporting} onClick={() => void handleMapPngExport()}><Download size={14} /> {pngExporting ? 'PNG…' : 'PNG'}</button></div></div>
-          <Suspense fallback={<div className="map-skeleton" role="status">Loading the cell grid…</div>}><GridMap cells={cells} selectedCell={selectedCell} selectedCells={selectedCells} onSelectCell={(id, additive) => { selectCell(id, additive); setInspectorOpen(true); }} onSelectCells={(ids) => { selectCells(ids); setInspectorOpen(true); }} layer={layer} onLayerChange={setLayer} plan={plan} connectivity={location.pathname === '/connectivity' ? activeConnectivity : null} opacity={gridOpacity} showOutlines={outlines} onOpacityChange={setGridOpacity} onOutlineToggle={() => setOutlines((value) => !value)} scenarioComparison={location.pathname === '/scenarios' ? scenarioComparison : null} /></Suspense>
-          <div className="map-footer"><span><span className="footer-cursor-dot" /> Click a cell to inspect <i>·</i> <kbd>Shift</kbd> click to compare</span><span>{selectedCell ? `SELECTED / ${selectedCell}` : `GRID / ${cells[0]?.id ?? '—'}—${cells[cells.length - 1]?.id ?? '—'}`} <i>·</i> {cells.length} ANALYSIS CELLS</span></div>
-          {selected && inspectorOpen && <CellInspector cell={selected} comparison={comparedCells.map((id) => cells.find((candidate) => candidate.id === id)).filter((cell): cell is Cell => Boolean(cell))} studyId={activeStudyId} plan={activePlan} onClose={() => setInspectorOpen(false)} onPlan={() => navigate('/planner')} />}
-        </div><div className="map-side-panel">{mapPage}<div className="side-panel-foot"><span className="side-footer-icon"><ShieldCheck size={14} /></span><span><b>Local demo model</b><small>Seeded cell scores are planning estimates.</small></span><button type="button" title="Data sources" onClick={() => navigate('/data-sources')}><ArrowUpRightFromSquare size={13} /></button></div></div></div>}
-        {!activeMap && <Routes>
-          <Route path="/" element={<LandingPage />} /><Route path="/login" element={<LoginPage />} />
-          <Route path="/overview" element={<Navigate to="/overview" replace />} /><Route path="/environment" element={<Navigate to="/environment" replace />} />
-          <Route path="/planner" element={<Navigate to="/planner" replace />} /><Route path="/scenarios" element={<Navigate to="/scenarios" replace />} />
-          <Route path="/what-if" element={<Navigate to="/what-if" replace />} /><Route path="/connectivity" element={<Navigate to="/connectivity" replace />} />
-          <Route path="/analytics" element={<Navigate to="/analytics" replace />} /><Route path="/reports" element={<ReportsPage cells={cells} plan={plan} studyId={activeStudyId} />} />
-          <Route path="/data-sources" element={<><Suspense fallback={<div className="map-skeleton" role="status">Loading study setup…</div>}><StudySetup /></Suspense><DataSourcesPage cells={cells} studyId={activeStudyId} /></>} /><Route path="/methodology" element={<MethodologyPage />} /><Route path="/settings" element={<SettingsPage user={user} apiOnline={apiOnline} onLightTheme={() => setLightTheme((value) => !value)} lightTheme={lightTheme} />} />
-          <Route path="*" element={<Navigate to="/overview" replace />} />
-        </Routes>}
+        {location.pathname === '/scenarios' ? (
+          <Suspense fallback={<div className="map-skeleton" role="status">Loading Scenario Lab…</div>}>
+            <ScenarioLabPage
+              cells={cells}
+              studyId={activeStudyId}
+              activeStudy={activeStudy}
+              studies={studies}
+              onSelectStudy={openStudy}
+              onOptimize={handleOptimize}
+            />
+          </Suspense>
+        ) : (
+          <>
+            {activeMap && pageTitle && <SectionTitle eyebrow={pageTitle.eyebrow} title={pageTitle.title} subtitle={pageTitle.subtitle} actions={<><button className="button button-quiet" type="button" onClick={() => setComparisonOpen(true)}><GitCompareArrows size={15} /> Compare</button><button className="button button-primary" type="button" onClick={() => void handleOptimize()}><WandSparkles size={15} /> Optimize plan</button></>} />}
+            {activeMap && <div className="map-workspace"><div className="map-main-column">
+              <div className="study-meta-row"><div className="study-meta-location"><Globe2 size={14} /><span>{(activeStudy?.name ?? 'Bengaluru East Campus').toUpperCase()}</span><i>·</i><span>{activeStudy?.columns ?? 10} × {activeStudy?.rows ?? 10} GRID</span><i>·</i><span>{Math.abs(activeStudy?.origin[0] ?? 12.9352).toFixed(2)}° {(activeStudy?.origin[0] ?? 12.9352) < 0 ? 'S' : 'N'}, {Math.abs(activeStudy?.origin[1] ?? 77.6245).toFixed(2)}° {(activeStudy?.origin[1] ?? 77.6245) < 0 ? 'W' : 'E'}</span></div><div className="map-export-actions"><button className="download-inline" type="button" onClick={() => void handleShare()}><Share2 size={14} /> Share view</button><button className="download-inline" type="button" onClick={() => void handleExport('csv')}><Download size={14} /> CSV</button><button className="download-inline" type="button" onClick={() => void handleExport('geojson')}><Download size={14} /> GeoJSON</button><button className="download-inline" type="button" disabled={pngExporting} onClick={() => void handleMapPngExport()}><Download size={14} /> {pngExporting ? 'PNG…' : 'PNG'}</button></div></div>
+              <Suspense fallback={<div className="map-skeleton" role="status">Loading the cell grid…</div>}><GridMap cells={cells} selectedCell={selectedCell} selectedCells={selectedCells} onSelectCell={(id, additive) => { selectCell(id, additive); setInspectorOpen(true); }} onSelectCells={(ids) => { selectCells(ids); setInspectorOpen(true); }} layer={layer} onLayerChange={setLayer} plan={plan} connectivity={location.pathname === '/connectivity' ? activeConnectivity : null} opacity={gridOpacity} showOutlines={outlines} onOpacityChange={setGridOpacity} onOutlineToggle={() => setOutlines((value) => !value)} scenarioComparison={location.pathname === '/scenarios' ? scenarioComparison : null} /></Suspense>
+              <div className="map-footer"><span><span className="footer-cursor-dot" /> Click a cell to inspect <i>·</i> <kbd>Shift</kbd> click to compare</span><span>{selectedCell ? `SELECTED / ${selectedCell}` : `GRID / ${cells[0]?.id ?? '—'}—${cells[cells.length - 1]?.id ?? '—'}`} <i>·</i> {cells.length} ANALYSIS CELLS</span></div>
+              <div className="map-bottom-stat-bar">
+                <div className="map-bottom-stat-item">
+                  <span>CAMPUS STUDY</span>
+                  <b>{(activeStudy?.name ?? 'Bengaluru East').toUpperCase()}</b>
+                </div>
+                <div className="map-bottom-stat-divider" />
+                <div className="map-bottom-stat-item">
+                  <span>GRID MATRIX</span>
+                  <b>{cells.length} CELLS · {activeStudy?.columns ?? 10}×{activeStudy?.rows ?? 10}</b>
+                </div>
+                <div className="map-bottom-stat-divider" />
+                <div className="map-bottom-stat-item">
+                  <span>MEAN PRIORITY</span>
+                  <b>{Math.round(avgPriority * 100)} / 100</b>
+                </div>
+                <div className="map-bottom-stat-divider" />
+                <div className="map-bottom-stat-item">
+                  <span>ALLOCATED CAPITAL</span>
+                  <b>₹{(activePlan?.totalCost ?? 0).toLocaleString('en-IN')} <small>({Math.round((activePlan?.utilization ?? 0) * 100)}%)</small></b>
+                </div>
+                <div className="map-bottom-stat-divider" />
+                <div className="map-bottom-stat-item">
+                  <span>SOLVER CONSTRAINTS</span>
+                  <b className="stat-valid-tag"><ShieldCheck size={13} /> {activePlan?.validation?.valid ? 'STRICTLY ENFORCED' : 'CHECK CONSTRAINTS'}</b>
+                </div>
+              </div>
+            </div>
+            <div className="map-side-panel">
+              {selected && inspectorOpen ? (
+                <CellInspector
+                  cell={selected}
+                  allCells={cells}
+                  comparison={comparedCells.map((id) => cells.find((candidate) => candidate.id === id)).filter((candidate): candidate is Cell => Boolean(candidate))}
+                  studyId={activeStudyId}
+                  plan={activePlan}
+                  budget={budget}
+                  onClose={() => {
+                    setInspectorOpen(false);
+                    selectCell('', false);
+                  }}
+                  onPlan={() => navigate('/planner')}
+                  onSelectCell={(id) => selectCell(id, false)}
+                />
+              ) : (
+                <>
+                  {mapPage}
+                  <div className="side-panel-foot">
+                    <span className="side-footer-icon"><ShieldCheck size={14} /></span>
+                    <span><b>Local demo model</b><small>Seeded cell scores are planning estimates.</small></span>
+                    <button type="button" title="Data sources" onClick={() => navigate('/data-sources')}>
+                      <ArrowUpRightFromSquare size={13} />
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>}
+            {!activeMap && <Routes>
+              <Route path="/" element={<LandingPage />} /><Route path="/login" element={<LoginPage />} />
+              <Route path="/overview" element={<Navigate to="/overview" replace />} /><Route path="/environment" element={<Navigate to="/environment" replace />} />
+              <Route path="/planner" element={<Navigate to="/planner" replace />} /><Route path="/scenarios" element={<Navigate to="/scenarios" replace />} />
+              <Route path="/what-if" element={<Navigate to="/what-if" replace />} /><Route path="/connectivity" element={<Navigate to="/connectivity" replace />} />
+              <Route path="/analytics" element={<Navigate to="/analytics" replace />} /><Route path="/reports" element={<ReportsPage cells={cells} plan={plan} studyId={activeStudyId} />} />
+              <Route path="/data-sources" element={<><Suspense fallback={<div className="map-skeleton" role="status">Loading study setup…</div>}><StudySetup /></Suspense><DataSourcesPage cells={cells} studyId={activeStudyId} /></>} /><Route path="/methodology" element={<MethodologyPage />} /><Route path="/settings" element={<SettingsPage user={user} apiOnline={apiOnline} onLightTheme={() => setLightTheme((value) => !value)} lightTheme={lightTheme} />} />
+              <Route path="*" element={<Navigate to="/overview" replace />} />
+            </Routes>}
+          </>
+        )}
       </div>
     </main>
     {comparisonOpen && <ScenarioCompareModal cells={cells} plan={plan} budget={budget} onClose={() => setComparisonOpen(false)} />}
@@ -471,6 +594,10 @@ function PlannerPage({ cells, user, studyId }: { cells: Cell[]; user: UserSessio
       <div className="optimizer-result-metric"><span>Allocated investment</span><b>₹{existingPlan.totalCost.toLocaleString('en-IN')}</b></div>
       <div className="result-progress"><i style={{ width: `${Math.max(2, existingPlan.utilization * 100)}%` }} /></div>
       <div className="optimizer-result-foot"><span>{existingPlan.cellsImproved} cells improved</span><span>{Math.round(existingPlan.utilization * 100)}% utilization</span></div>
+      <div className="demo-flow-actions" aria-label="Continue with this plan">
+        <Link className="button button-quiet" to="/scenarios" onClick={() => setPlan(existingPlan)}><GitCompareArrows size={14} /> Compare scenarios</Link>
+        <Link className="button button-primary" to="/reports" onClick={() => setPlan(existingPlan)}><FileBarChart size={14} /> Create report</Link>
+      </div>
 
       {efficiencyGain !== null && (
         <div className="benchmark-badge">
@@ -494,6 +621,8 @@ function PlannerPage({ cells, user, studyId }: { cells: Cell[]; user: UserSessio
       <button type="button" className="pareto-toggle-btn" onClick={() => void loadPareto()}>
         <GitCompareArrows size={14} /> Explore Pareto Trade-Off Curve (pymoo NSGA-II)
       </button>
+
+      <AIValidationAssistant studyId={studyId} plan={existingPlan} budget={budget} />
     </div>}
 
     {paretoOpen && (
@@ -597,7 +726,12 @@ function ScenarioPage({ cells, studyId, onCompareChange }: { cells: Cell[]; stud
     </div>
     <div className="scenario-comparison-summary"><span className="summary-number"><ArrowUpRight size={19} />{delta >= 0 ? '+' : ''}{(delta * 100).toFixed(1)}</span><div><b>Weighted benefit points</b><small>Proposal vs. baseline model</small></div></div>
     <div className="compare-stat-table"><div className="compare-stat-heading"><span>MEASURE</span><span>BASELINE</span><span>PROPOSAL</span></div><div><b>Cells improved</b><span>{leftPlan?.cellsImproved ?? 0}</span><strong>{rightPlan?.cellsImproved ?? 0}</strong></div><div><b>Investment</b><span>₹{(leftPlan?.totalCost ?? 0).toLocaleString('en-IN')}</span><strong>₹{(rightPlan?.totalCost ?? 0).toLocaleString('en-IN')}</strong></div><div><b>Plan benefit</b><span>{(leftPlan?.combinedBenefit ?? 0).toFixed(1)}</span><strong>{(rightPlan?.combinedBenefit ?? 0).toFixed(1)}</strong></div><div><b>Budget remaining</b><span>₹{(leftPlan?.remainingBudget ?? 0).toLocaleString('en-IN')}</span><strong>₹{(rightPlan?.remainingBudget ?? 0).toLocaleString('en-IN')}</strong></div></div>
+    <AIScenarioExplainer studyId={studyId} baseline={leftPlan ? { budget: leftBudget, weights, plan: leftPlan } : { budget: leftBudget, weights }} proposal={rightPlan ? { budget: rightBudget, weights, plan: rightPlan } : { budget: rightBudget, weights }} />
     <div className="scenario-saved-panel"><div className="panel-heading"><div><span className="panel-kicker">SAVED TO THIS STUDY</span><h2>Scenario history</h2></div><span className="section-count">{savedScenarios.length}</span></div>{savedScenarios.length ? savedScenarios.slice(-3).reverse().map((scenario) => <div className="saved-scenario-row" key={scenario.id}><span><b>{scenario.name}</b><small>{new Date(scenario.createdAt).toLocaleDateString()} · {scenario.plan?.cellsImproved ?? 0} cells improved</small></span><strong>₹{(scenario.plan?.totalCost ?? 0).toLocaleString('en-IN')}</strong></div>) : <p className="scenario-empty-note">Saved comparisons appear here when the API database is configured.</p>}{savedDelta && <p className="scenario-delta-note">Latest saved comparison · {(savedDelta.benefit ?? 0) >= 0 ? '+' : ''}{(savedDelta.benefit ?? 0).toFixed(1)} benefit · {(savedDelta.cells ?? 0) >= 0 ? '+' : ''}{savedDelta.cells ?? 0} cells · ₹{(savedDelta.cost ?? 0).toLocaleString('en-IN')} cost delta</p>}</div>
+    <div className="demo-flow-actions scenario-next-actions">
+      <button className="button button-quiet" type="button" onClick={() => { setPlan(rightPlan); setLayer('recommended'); pushToast('Proposal applied as the active plan. Open Reports to export it.', 'success'); }}><CheckCircle2 size={14} /> Use proposal as active plan</button>
+      <Link className="button button-primary" to="/reports" onClick={() => { setPlan(rightPlan); setLayer('recommended'); }}><FileBarChart size={14} /> Continue to report</Link>
+    </div>
     <button className="button button-primary save-scenario" type="button" onClick={() => void save()} disabled={saving || !canSave}><FilePlus2 size={15} />{saving ? 'Saving scenario…' : 'Save proposal to scenarios'}</button>
     {!canSave && <div className="viewer-note"><ShieldCheck size={14} /> Sign in as a planner to save persistent comparisons. <Link to="/login">Workspace access</Link></div>}
   </>;
@@ -652,423 +786,147 @@ function AnalyticsPage({ cells, plan }: { cells: Cell[]; plan: OptimizerResult }
   </>;
 }
 
-function CellInspector({ cell, comparison, studyId, plan, onClose, onPlan }: { cell: Cell; comparison: Cell[]; studyId: string; plan?: OptimizerResult | null; onClose: () => void; onPlan: () => void }) {
-  const score = combinedPriority(cell.scores);
-  const [quantity, setQuantity] = useState(1);
-  const [intervention, setIntervention] = useState<InterventionId>('native_trees');
-  const result = simulateWhatIf(cell, intervention, quantity);
-
-  type InspectorIntervention = {
-    cellId: string;
-    interventionName?: string;
-    modelStatus?: string;
-    quantity?: number;
-    unit?: string;
-    cost?: number;
-    suitabilityScore?: number;
-    reasons?: string[];
-    categoryBenefit?: {
-      heat?: number;
-      vegetation?: number;
-      pedestrian?: number;
-      connectivity?: number;
-      biodiversity?: number;
-    };
-  };
-  type InspectorRejected = {
-    candidate?: { cellId?: string };
-    cellId?: string;
-    reason?: string;
-    reasons?: string[];
-  };
-
-  const selectedIntervention = ((plan?.selected || []) as unknown as InspectorIntervention[]).find((item) => item.cellId === cell.id);
-  const rejectedCandidate = ((plan?.rejected || []) as unknown as InspectorRejected[]).find((item) => (item.candidate?.cellId === cell.id || item.cellId === cell.id));
-
-  // Computer Vision State
-  const [cvData, setCvData] = useState<Awaited<ReturnType<typeof api.cvSegmentCell>> | null>(null);
-  const [cvLoading, setCvLoading] = useState(false);
-  const [cvViewMode, setCvViewMode] = useState<'blended' | 'satellite' | 'mask'>('blended');
-
-  useEffect(() => {
-    let active = true;
-    setCvLoading(true);
-    setCvData(null);
-    api.cvSegmentCell({
-      studyId,
-      cellId: cell.id,
-      lat: cell.center[0],
-      lng: cell.center[1],
-      zoom: 18,
-    })
-      .then((res) => {
-        if (active) {
-          setCvData(res);
-          setCvLoading(false);
-        }
-      })
-      .catch(() => {
-        if (active) setCvLoading(false);
-      });
-    return () => { active = false; };
-  }, [cell.center, cell.id, studyId]);
-
-  const chooseIntervention = async () => {
-    try { await api.whatIf({ studyId, cellId: cell.id, interventionId: intervention, quantity }); } catch { /* The local what-if preview remains deterministic and available offline. */ }
-    onPlan();
-  };
-
-  const applyCvRecommendation = (recType: string) => {
-    if (recType === 'native_trees') {
-      setIntervention('native_trees');
-      if (cvData?.plantingCapacityTrees) {
-        setQuantity(Math.min(8, Math.max(1, cvData.plantingCapacityTrees)));
-      }
-    } else if (recType === 'shade_structure') {
-      setIntervention('shade_structure');
-      setQuantity(3);
-    } else if (recType === 'pollinator_strip') {
-      setIntervention('pollinator_corridor');
-      setQuantity(2);
-    }
-  };
-
-  return (
-    <aside className="cell-inspector" aria-label={`Cell ${cell.id} inspector`}>
-      <div className="inspector-grabber" />
-      <div className="inspector-top">
-        <div>
-          <span className="panel-kicker">CELL INSPECTOR</span>
-          <h2>{cell.id} <span>/</span> {cell.areaName}</h2>
-        </div>
-        <button className="icon-button" aria-label="Close cell inspector" type="button" onClick={onClose}>
-          <X size={16} />
-        </button>
-      </div>
-
-      <div className="inspector-tags">
-        <RiskPill score={score} />
-        <span className="inspector-landuse">{cell.landUse.replaceAll('_', ' ')}</span>
-        <span className="inspector-confidence"><ShieldCheck size={12} />{Math.round(cell.dataConfidence * 100)}% confidence</span>
-        {(() => {
-          const meta = cell as unknown as { dataLabel?: string; dataSource?: string; treeSuitability?: number; availableArea?: number; undergroundClearance?: number; roadClearance?: number };
-          return (
-            <span className="inspector-provenance-badge" style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(234, 179, 8, 0.15)', color: '#eab308', border: '1px solid rgba(234, 179, 8, 0.3)', fontWeight: 600 }}>
-              {(meta.dataLabel?.includes('SYNTHETIC') || meta.dataSource === 'synthetic_demo') ? 'SYNTHETIC DEMO DATA' : 'REAL DATA'}
-            </span>
-          );
-        })()}
-      </div>
-
-      {/* ML PREDICTION & HARD SAFETY CONSTRAINTS */}
-      {(() => {
-        const meta = cell as unknown as { treeSuitability?: number; availableArea?: number; undergroundClearance?: number; roadClearance?: number };
-        return (
-          <div className="panel inspector-ml-card" style={{ marginTop: '12px', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <span className="panel-kicker" style={{ color: '#4CC38A' }}>ML TREE SUITABILITY</span>
-              <span style={{ fontSize: '10px', background: 'rgba(76, 195, 138, 0.2)', color: '#4CC38A', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
-                ML PREDICTION (2.1.0-CALIBRATED)
-              </span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px' }}>
-              <div>
-                <span style={{ color: '#888', display: 'block', fontSize: '10px' }}>PREDICTED SUITABILITY</span>
-                <b>{(meta.treeSuitability ?? Math.round(cell.scores.vegetation * 100))}%</b>
-              </div>
-              <div>
-                <span style={{ color: '#888', display: 'block', fontSize: '10px' }}>PLANTING SPACE</span>
-                <b>{(meta.availableArea ?? 45)} m²</b>
-              </div>
-              <div>
-                <span style={{ color: '#888', display: 'block', fontSize: '10px' }}>UTILITY CLEARANCE</span>
-                <b>{(meta.undergroundClearance ?? 6.0)} m</b>
-              </div>
-              <div>
-                <span style={{ color: '#888', display: 'block', fontSize: '10px' }}>SIGHTLINE SETBACK</span>
-                <b>{(meta.roadClearance ?? 8.0)} m</b>
-              </div>
-            </div>
-            <div style={{ marginTop: '8px', fontSize: '10px', color: '#94a3b8', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '6px' }}>
-              <ShieldCheck size={11} style={{ verticalAlign: 'middle', marginRight: '4px', color: '#4CC38A' }} />
-              <span>Safety Policy: High ML score NEVER overrides underground utility (3m) or road sightline (2.5m) setbacks.</span>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* OPTIMIZER RECOMMENDATION & DECISION EXPLAINABILITY (WHAT -> WHERE -> HOW MUCH -> WHY -> COST -> IMPACT) */}
-      {selectedIntervention ? (
-        <div className="panel inspector-rec-card" style={{ marginTop: '10px', padding: '12px', background: 'rgba(76, 195, 138, 0.08)', borderRadius: '8px', border: '1px solid rgba(76, 195, 138, 0.3)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-            <span className="panel-kicker" style={{ color: '#4CC38A' }}>OPTIMIZER PORTFOLIO RECOMMENDATION</span>
-            <span style={{ fontSize: '9px', background: 'rgba(76, 195, 138, 0.25)', color: '#4CC38A', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
-              {selectedIntervention.modelStatus ? String(selectedIntervention.modelStatus).toUpperCase() : 'ML VALIDATED'}
-            </span>
-          </div>
-          <h3 style={{ margin: '0 0 6px 0', fontSize: '13px', color: '#fff', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <WandSparkles size={14} color="#4CC38A" />
-            {selectedIntervention.interventionName}
-          </h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', fontSize: '11px', background: 'rgba(0,0,0,0.25)', padding: '6px 8px', borderRadius: '6px', marginBottom: '8px' }}>
-            <div>
-              <span style={{ color: '#888', display: 'block', fontSize: '9px' }}>QUANTITY</span>
-              <b>{selectedIntervention.quantity} {selectedIntervention.unit}</b>
-            </div>
-            <div>
-              <span style={{ color: '#888', display: 'block', fontSize: '9px' }}>TOTAL COST</span>
-              <b>₹{Number(selectedIntervention.cost).toLocaleString('en-IN')}</b>
-            </div>
-            <div>
-              <span style={{ color: '#888', display: 'block', fontSize: '9px' }}>SUITABILITY</span>
-              <b style={{ color: '#4CC38A' }}>{selectedIntervention.suitabilityScore ?? ((cell as unknown as { treeSuitability?: number }).treeSuitability || 50)}%</b>
-            </div>
-          </div>
-
-          {/* Decision Rationale (WHY) */}
-          <div style={{ marginBottom: '8px' }}>
-            <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600, display: 'block', marginBottom: '3px' }}>DECISION RATIONALE (WHY):</span>
-            <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '10.5px', color: '#e2e8f0', lineHeight: 1.45 }}>
-              {selectedIntervention.reasons && selectedIntervention.reasons.length > 0 ? (
-                selectedIntervention.reasons.map((r: string, idx: number) => <li key={idx}>{r}</li>)
-              ) : (
-                <>
-                  <li>Maximized weighted benefit under active budget envelope</li>
-                  <li>Compliant with physical site setbacks and ground capacity</li>
-                </>
-              )}
-            </ul>
-          </div>
-
-          {/* Expected Multi-Benefit Impact */}
-          {selectedIntervention.categoryBenefit && (
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '6px' }}>
-              <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600, display: 'block', marginBottom: '3px' }}>EXPECTED IMPACT (BENEFIT POINTS):</span>
-              <div style={{ display: 'flex', gap: '8px', fontSize: '10px', color: '#cbd5e1' }}>
-                <span>Heat: <b style={{ color: '#4CC38A' }}>+{selectedIntervention.categoryBenefit.heat}</b></span>
-                <span>Green: <b style={{ color: '#4CC38A' }}>+{selectedIntervention.categoryBenefit.vegetation}</b></span>
-                <span>Pedestrian: <b style={{ color: '#4CC38A' }}>+{selectedIntervention.categoryBenefit.pedestrian}</b></span>
-                <span>Conn: <b style={{ color: '#4CC38A' }}>+{selectedIntervention.categoryBenefit.connectivity}</b></span>
-              </div>
-            </div>
-          )}
-        </div>
-      ) : rejectedCandidate ? (
-        <div className="panel inspector-rejected-card" style={{ marginTop: '10px', padding: '10px', background: 'rgba(239, 68, 68, 0.06)', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.25)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
-            <span className="panel-kicker" style={{ color: '#f87171' }}>OPTIMIZATION EXCLUSION</span>
-            <span style={{ fontSize: '9px', background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', padding: '1px 5px', borderRadius: '3px' }}>CONSTRAINT GATED</span>
-          </div>
-          <p style={{ margin: 0, fontSize: '10.5px', color: '#fca5a5', lineHeight: 1.4 }}>
-            {rejectedCandidate.reason || 'Candidate not selected due to site feasibility, area limit, or capital budget envelope.'}
-          </p>
-        </div>
-      ) : null}
-
-      {/* SATELLITE COMPUTER VISION SURFACE SEGMENTATION */}
-      <div className="inspector-cv-card">
-        <div className="inspector-cv-header">
-          <div>
-            <span className="panel-kicker">SATELLITE COMPUTER VISION</span>
-            <b>0.58m Surface Segmentation</b>
-          </div>
-          {cvData && (
-            <span className="cv-confidence-pill">
-              <ShieldCheck size={11} /> {Math.round(cvData.visionConfidence * 100)}% CV CONFIDENCE
-            </span>
-          )}
-        </div>
-
-        {cvLoading && (
-          <div className="cv-loading-box">
-            <RefreshCw size={14} className="spin" />
-            <span>Segmenting aerial satellite raster…</span>
-          </div>
-        )}
-
-        {cvData && !cvLoading && (
-          <>
-            <div className="cv-stage-wrap">
-              <img
-                src={cvViewMode === 'blended' ? cvData.images.blended : cvViewMode === 'satellite' ? cvData.images.satellite : cvData.images.segmentationMask}
-                alt="Satellite CV Segmentation"
-                className="cv-stage-img"
-              />
-              <div className="cv-stage-badge">
-                <Scan size={10} style={{ marginRight: 3, verticalAlign: 'middle', display: 'inline-block' }} />
-                {cvViewMode.toUpperCase()} · ZOOM {cvData.zoom}
-              </div>
-            </div>
-
-            <div className="cv-mode-selector">
-              <button
-                type="button"
-                className={`cv-mode-btn ${cvViewMode === 'blended' ? 'active' : ''}`}
-                onClick={() => setCvViewMode('blended')}
-              >
-                Blended
-              </button>
-              <button
-                type="button"
-                className={`cv-mode-btn ${cvViewMode === 'satellite' ? 'active' : ''}`}
-                onClick={() => setCvViewMode('satellite')}
-              >
-                RGB Aerial
-              </button>
-              <button
-                type="button"
-                className={`cv-mode-btn ${cvViewMode === 'mask' ? 'active' : ''}`}
-                onClick={() => setCvViewMode('mask')}
-              >
-                CV Mask
-              </button>
-            </div>
-
-            {/* Stacked Percentage Bar */}
-            <div className="cv-stacked-bar" title="Surface class distribution">
-              <div style={{ width: `${cvData.surfaceBreakdown.tree_canopy}%`, backgroundColor: '#15803d' }} title={`Tree Canopy: ${cvData.surfaceBreakdown.tree_canopy}%`} />
-              <div style={{ width: `${cvData.surfaceBreakdown.grass_permeable}%`, backgroundColor: '#84cc16' }} title={`Permeable Turf: ${cvData.surfaceBreakdown.grass_permeable}%`} />
-              <div style={{ width: `${cvData.surfaceBreakdown.building_rooftop}%`, backgroundColor: '#f97316' }} title={`Rooftops: ${cvData.surfaceBreakdown.building_rooftop}%`} />
-              <div style={{ width: `${cvData.surfaceBreakdown.impervious_pavement}%`, backgroundColor: '#475569' }} title={`Pavement: ${cvData.surfaceBreakdown.impervious_pavement}%`} />
-              <div style={{ width: `${cvData.surfaceBreakdown.water_body}%`, backgroundColor: '#0284c7' }} title={`Water: ${cvData.surfaceBreakdown.water_body}%`} />
-            </div>
-
-            {/* Class Breakdown Grid */}
-            <div className="cv-breakdown-grid">
-              <div className="cv-breakdown-item">
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  <i className="cv-breakdown-dot" style={{ backgroundColor: '#15803d' }} /> Canopy
-                </span>
-                <b>{cvData.surfaceBreakdown.tree_canopy}%</b>
-              </div>
-              <div className="cv-breakdown-item">
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  <i className="cv-breakdown-dot" style={{ backgroundColor: '#84cc16' }} /> Permeable
-                </span>
-                <b>{cvData.surfaceBreakdown.grass_permeable}%</b>
-              </div>
-              <div className="cv-breakdown-item">
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  <i className="cv-breakdown-dot" style={{ backgroundColor: '#f97316' }} /> Rooftops
-                </span>
-                <b>{cvData.surfaceBreakdown.building_rooftop}%</b>
-              </div>
-              <div className="cv-breakdown-item">
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  <i className="cv-breakdown-dot" style={{ backgroundColor: '#475569' }} /> Pavement
-                </span>
-                <b>{cvData.surfaceBreakdown.impervious_pavement}%</b>
-              </div>
-            </div>
-
-            {/* Derived Physical Metrics */}
-            <div className="cv-metrics-strip">
-              <div className="cv-metric-box">
-                <span>PERMEABLE</span>
-                <b>{Math.round(cvData.permeableAreaSqm)} m²</b>
-              </div>
-              <div className="cv-metric-box">
-                <span>IMPERVIOUS</span>
-                <b>{Math.round(cvData.imperviousAreaSqm)} m²</b>
-              </div>
-              <div className="cv-metric-box">
-                <span>CAPACITY</span>
-                <b>{cvData.plantingCapacityTrees} trees</b>
-              </div>
-            </div>
-
-            {/* Top AI CV Recommendation */}
-            {cvData.recommendations?.[0] && (() => {
-              const topRec = cvData.recommendations[0];
-              return (
-                <div className="cv-rec-box">
-                  <div className="cv-rec-title">
-                    <WandSparkles size={11} /> {topRec.title}
-                  </div>
-                  <p style={{ margin: 0, color: 'var(--muted)', fontSize: '7.5px', lineHeight: 1.4 }}>
-                    {topRec.reason}
-                  </p>
-                  <button
-                    type="button"
-                    className="cv-rec-btn"
-                    onClick={() => applyCvRecommendation(topRec.type)}
-                  >
-                    <Sprout size={11} /> Apply to What-If
-                  </button>
-                </div>
-              );
-            })()}
-          </>
-        )}
-      </div>
-
-      <div className="inspector-score-list">
-        {(['heat', 'vegetation', 'pedestrian', 'connectivity', 'feasibility'] as const).map((key) => (
-          <div className="inspector-score-row" key={key}>
-            <span>{key === 'heat' ? 'Heat risk' : key === 'vegetation' ? 'Vegetation deficit' : key === 'pedestrian' ? 'Pedestrian exposure' : key === 'connectivity' ? 'Connectivity need' : 'Feasibility'}</span>
-            <div><i style={{ width: `${cell.scores[key] * 100}%` }} className={`score-fill-${key}`} /></div>
-            <b>{Math.round(cell.scores[key] * 100)}</b>
-          </div>
-        ))}
-      </div>
-
-      <div className="inspector-green">
-        <span>Existing green cover</span>
-        <b>{Math.round(cell.existingGreenCover * 100)}%</b>
-        <span className="green-segments">
-          {Array.from({ length: 10 }, (_, index) => <i key={index} className={cell.existingGreenCover * 10 > index ? 'filled' : ''} />)}
-        </span>
-      </div>
-
-      {comparison.length > 1 && (
-        <div className="compare-inspector">
-          <GitCompareArrows size={14} /> Comparing {comparison.map((item) => item.id).join(' ↔ ')} · {Math.round(combinedPriority(comparison[0]!.scores) * 100)} vs {Math.round(combinedPriority(comparison[1]!.scores) * 100)}
-        </div>
-      )}
-
-      <div className="inspector-whatif">
-        <div><span className="panel-kicker">QUICK WHAT-IF</span><b>Try a local intervention</b></div>
-        <select aria-label="Select an intervention for this cell" value={intervention} onChange={(event) => setIntervention(event.currentTarget.value as InterventionId)}>
-          {INTERVENTIONS.map((item) => <option key={item.id} value={item.id}>{item.shortName}</option>)}
-        </select>
-        <label className="inspector-quantity">
-          QUANTITY <b>{quantity} units</b>
-          <input aria-label={`Intervention quantity for ${cell.id}`} type="range" min="1" max="8" value={quantity} onChange={(event) => setQuantity(Number(event.currentTarget.value))} />
-        </label>
-        <div className="whatif-preview-score">
-          <span>Priority score</span>
-          <b>{Math.round(score * 100)} <ArrowRight size={12} /> {Math.round(combinedPriority(result.after) * 100)}</b>
-        </div>
-        <button className="button button-primary inspector-action" type="button" onClick={() => void chooseIntervention()}>
-          <Sprout size={14} /> Add to plan <ArrowRight size={13} />
-        </button>
-      </div>
-
-      <div className="inspector-coordinate">
-        ROW {cell.row + 1} <i>·</i> COLUMN {cell.col + 1} <i>·</i> {cell.center[0].toFixed(4)}° N, {cell.center[1].toFixed(4)}° E
-      </div>
-    </aside>
-  );
-}
-
 function ReportsPage({ cells, plan, studyId }: { cells: Cell[]; plan: OptimizerResult | null; studyId: string }) {
   const [loading, setLoading] = useState(false);
-  const { pushToast, studies } = useEcoStore();
+  const { pushToast, studies, weights, budget } = useEcoStore();
   const activeStudy = studies.find((study) => study.id === studyId);
   const reportDate = new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date()).toUpperCase();
   const exportFile = async (format: 'pdf' | 'json') => {
     setLoading(true);
+    const sanitizedStudyName = activeStudy?.name
+      ? activeStudy.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+      : studyId;
+    const filename = `ecogrid-${sanitizedStudyName}-climate-report.${format}`;
+
     try {
-      const response = await api.report(studyId, format);
-      if (!response.ok) throw new Error('The report service is not available.');
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `ecogrid-climate-report.${format}`; anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 0);
-      pushToast(`${format.toUpperCase()} report downloaded.`, 'success');
-    } catch { pushToast('Report preview is available; the PDF endpoint activates with the deployed API.', 'error'); }
-    setLoading(false);
+      // Prefer the server-generated report, but keep the demo flow usable when the API is offline.
+      try {
+        const response = await api.report(studyId, format, budget);
+        if (!response.ok) throw new Error(`Report endpoint returned ${response.status}`);
+        const contentType = response.headers.get('content-type') ?? '';
+        if (format === 'pdf' && !contentType.includes('application/pdf')) {
+          throw new Error(`Expected PDF content-type, received ${contentType}`);
+        }
+        const rawBlob = await response.blob();
+        const blob = new Blob([rawBlob], { type: format === 'pdf' ? 'application/pdf' : 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.style.display = 'none';
+        anchor.href = url;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        window.setTimeout(() => {
+          anchor.remove();
+          URL.revokeObjectURL(url);
+        }, 2000);
+        pushToast(`${format.toUpperCase()} report downloaded successfully: ${filename}`, 'success');
+        return;
+      } catch {
+        if (format === 'pdf') {
+          // Direct stream fallback before browser print
+          try {
+            const directUrl = `/api/studies/${encodeURIComponent(studyId)}/report?format=pdf${budget != null ? `&budget=${encodeURIComponent(budget)}` : ''}`;
+            const link = document.createElement('a');
+            link.style.display = 'none';
+            link.href = directUrl;
+            link.download = filename;
+            link.target = '_blank';
+            document.body.appendChild(link);
+            link.click();
+            window.setTimeout(() => link.remove(), 2000);
+            pushToast(`Downloading ${filename}…`, 'success');
+            return;
+          } catch {
+            // Browser print dialog provides a no-dependency PDF fallback.
+            window.print();
+            pushToast('Use “Save as PDF” in the print dialog to export this report.', 'info');
+            return;
+          }
+        }
+        const selected = plan?.selected ?? [];
+        const payload = {
+          title: 'EcoGrid AI 2.0 — Climate Intervention Plan',
+          generatedAt: new Date().toISOString(),
+          study: { id: studyId, name: activeStudy?.name ?? 'Study area', rows: activeStudy?.rows ?? null, columns: activeStudy?.columns ?? null, cellCount: cells.length },
+          dataNote: 'Planning estimates based on the currently loaded study data. Verify data provenance and site conditions before real-world implementation.',
+          methodNote: 'This report exports the active plan shown in the application. It does not independently certify that ML inference or a remote optimization service ran.',
+          plan: plan ? {
+            totalCost: plan.totalCost,
+            remainingBudget: plan.remainingBudget,
+            utilization: plan.utilization,
+            combinedBenefit: plan.combinedBenefit,
+            cellsImproved: plan.cellsImproved,
+            validation: plan.validation,
+            selected,
+            rejectedCount: plan.rejected?.length ?? 0,
+          } : null,
+          planningInputs: { budget, weights },
+          cellSummary: {
+            meanPriority: cells.length ? cells.reduce((sum, cell) => sum + combinedPriority(cell.scores), 0) / cells.length : 0,
+            cells: cells.map((cell) => ({ id: cell.id, areaName: cell.areaName, priority: combinedPriority(cell.scores), scores: cell.scores })),
+          },
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.style.display = 'none';
+        anchor.href = url;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        window.setTimeout(() => {
+          anchor.remove();
+          URL.revokeObjectURL(url);
+        }, 2000);
+        pushToast(`Downloaded local JSON report: ${filename}`, 'info');
+      }
+    } finally { setLoading(false); }
   };
-  return <div className="document-page"><SectionTitle eyebrow="DECISION RECORDS" title="Reports that travel." subtitle="A print-ready briefing, tied to the grid and its assumptions." actions={<button className="button button-primary" type="button" disabled={loading} onClick={() => void exportFile('pdf')}><FileDown size={15} /> Export PDF</button>} /><div className="report-cover"><div className="report-cover-top"><BrandMark small /><span>FIELD REPORT / 01</span><span>{reportDate}</span></div><div><span className="eyebrow">{(activeStudy?.name ?? 'Study area').toUpperCase()} · STUDY AREA</span><h2>Cooling the blocks<br />between the buildings.</h2><p>An intervention brief for a more shaded, more connected campus.</p></div><div className="report-cover-map"><div className="cover-map-grid">{cells.map((cell) => <i key={cell.id} className={`cover-cell risk-tone-${riskBand(combinedPriority(cell.scores)).toLowerCase()}`} />)}</div><span>{cells.length} ASSESSMENT CELLS · {activeStudy?.rows ?? '—'} × {activeStudy?.columns ?? '—'} GRID</span></div><div className="report-cover-stats"><span><b>{cells.length ? Math.round(cells.reduce((sum, cell) => sum + combinedPriority(cell.scores), 0) / cells.length * 100) : 0}</b><small>MEAN PRIORITY</small></span><span><b>{plan?.cellsImproved ?? 0}</b><small>CELLS IN PLAN</small></span><span><b>₹{(plan?.totalCost ?? 0).toLocaleString('en-IN')}</b><small>ALLOCATED</small></span></div><button className="report-json-link" type="button" onClick={() => void exportFile('json')}><FileJson2 size={14} /> Download structured JSON <ArrowRight size={13} /></button></div><div className="report-footnote"><ShieldCheck size={15} /> Reports contain study-specific estimates and assumptions. Confirm site conditions before implementing physical work.</div></div>;
+  return <div className="document-page">
+    <SectionTitle
+      eyebrow="DECISION RECORDS"
+      title="Reports that travel."
+      subtitle="A print-ready briefing, tied to the grid and its assumptions."
+      actions={
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <a
+            href={`/api/studies/${encodeURIComponent(studyId)}/report?format=pdf&inline=true${budget != null ? `&budget=${encodeURIComponent(budget)}` : ''}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="button button-quiet"
+            title="Open PDF report in a new tab"
+          >
+            <ExternalLink size={14} /> View in Browser
+          </a>
+          <button
+            className="button button-primary"
+            type="button"
+            disabled={loading}
+            onClick={() => void exportFile('pdf')}
+          >
+            {loading ? <RefreshCw size={14} className="spin" /> : <FileDown size={14} />}
+            <span>{loading ? 'Generating PDF…' : 'Export PDF'}</span>
+          </button>
+        </div>
+      }
+    />
+    <div className="report-grid-layout">
+      <div className="report-cover">
+        <div className="report-cover-top"><BrandMark small /><span>FIELD REPORT / 01</span><span>{reportDate}</span></div>
+        <div><span className="eyebrow">{(activeStudy?.name ?? 'Study area').toUpperCase()} · STUDY AREA</span><h2>Cooling the blocks<br />between the buildings.</h2><p>An intervention brief for a more shaded, more connected campus.</p></div>
+        <div className="report-cover-map"><div className="cover-map-grid">{cells.map((cell) => <i key={cell.id} className={`cover-cell risk-tone-${riskBand(combinedPriority(cell.scores)).toLowerCase()}`} />)}</div><span>{cells.length} ASSESSMENT CELLS · {activeStudy?.rows ?? '—'} × {activeStudy?.columns ?? '—'} GRID</span></div>
+        <div className="report-cover-stats"><span><b>{cells.length ? Math.round(cells.reduce((sum, cell) => sum + combinedPriority(cell.scores), 0) / cells.length * 100) : 0}</b><small>MEAN PRIORITY</small></span><span><b>{plan?.cellsImproved ?? 0}</b><small>CELLS IN PLAN</small></span><span><b>₹{(plan?.totalCost ?? 0).toLocaleString('en-IN')}</b><small>ALLOCATED</small></span></div>
+        <button className="report-json-link" type="button" onClick={() => void exportFile('json')}><FileJson2 size={14} /> Download structured JSON <ArrowRight size={13} /></button>
+      </div>
+      <div className="report-briefing-col">
+        <AIImpactReportSummary studyId={studyId} studyName={activeStudy?.name ?? 'Study area'} plan={plan} budget={budget} />
+      </div>
+    </div>
+    <div className="report-footnote"><ShieldCheck size={15} /> Reports contain study-specific estimates and assumptions. Confirm site conditions before implementing physical work.</div>
+  </div>;
 }
+
 
 function DataSourcesPage({ cells, studyId }: { cells: Cell[]; studyId: string }) {
   const { pushToast, setCells, studies } = useEcoStore();

@@ -684,9 +684,9 @@ app.get('/api/studies/:id/report', async (request, reply) => {
   const connectivity = analyzeConnectivity(cells, plan.selected.map((candidate) => candidate.cellId));
   const report = { generatedAt: new Date().toISOString(), study, cellCount: cells.length, polygonCount: cells.length, priorityCells: cells.filter((cell) => cell.priorityZone).length, criticalCells: cells.filter((cell) => riskBand(combinedPriority(cell.scores)) === 'CRITICAL').length, plan, connectivity };
   if (query.format === 'json') return report;
-  reply.header('content-type', 'application/pdf').header('content-disposition', `attachment; filename="${params.id}-climate-plan.pdf"`);
   const pdf = new PDFDocument({ margin: 46, size: 'A4' });
-  reply.send(pdf);
+  const chunks: Buffer[] = [];
+  pdf.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
   pdf.fontSize(22).fillColor('#164940').text('EcoGrid AI 2.0', { continued: false });
   pdf.moveDown(0.3).fontSize(15).fillColor('#111827').text(`Climate intervention report · ${study.name}`);
   pdf.moveDown().fontSize(10).fillColor('#4B5563').text(`Generated ${new Date(report.generatedAt).toLocaleString()} · ${cells.length} analysis cells · ${cells.length} polygon features`);
@@ -698,7 +698,15 @@ app.get('/api/studies/:id/report', async (request, reply) => {
   pdf.fontSize(10).fillColor('#374151').text(`${connectivity.beforeComponents} existing components · ${connectivity.afterComponents} after proposed plan · ${connectivity.newConnections} connections gained · ${connectivity.isolatedPatches.length} isolated green patches`);
   pdf.moveDown().fontSize(8).fillColor('#6B7280').text('Scores are deterministic planning estimates for the selected study data. Validate site conditions before installation.');
   pdf.end();
-  return reply;
+  const pdfBuffer = await new Promise<Buffer>((resolve, reject) => {
+    pdf.on('end', () => resolve(Buffer.concat(chunks)));
+    pdf.on('error', reject);
+  });
+  return reply
+    .header('content-type', 'application/pdf')
+    .header('content-disposition', `attachment; filename="${params.id}-climate-plan.pdf"`)
+    .header('content-length', pdfBuffer.length)
+    .send(pdfBuffer);
 });
 
 app.setNotFoundHandler(async (request, reply) => {

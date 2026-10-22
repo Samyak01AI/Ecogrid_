@@ -49,7 +49,42 @@ function rotatePoint(latitude: number, longitude: number, origin: LatLng, degree
   return [origin[0] + dLat * Math.cos(radians) - dLng * Math.sin(radians), origin[1] + dLat * Math.sin(radians) + dLng * Math.cos(radians)];
 }
 
-function namedZone(row: number, col: number): string {
+function hashSeed(id: string): number {
+  if (!id || id === 'study-bengaluru-east' || id === 'ecogrid-campus-demo') return 20261010;
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = ((hash << 5) - hash) + id.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash) || 20261010;
+}
+
+function namedZone(row: number, col: number, studyId = ''): string {
+  const sid = studyId.toLowerCase();
+  if (sid.includes('delhi')) {
+    if (row >= 4 && row <= 5 && col >= 3 && col <= 6) return 'Kartavya Path Central Avenue (Zone C)';
+    if (row <= 1 && col >= 3 && col <= 6) return 'Connaught Place Outer Radial (Zone A)';
+    if (row >= 2 && row <= 3 && col >= 3 && col <= 6) return 'National Museum & Cultural Precinct';
+    if (row >= 4 && row <= 6 && col >= 7) return 'India Gate Hexagon & Radial Canopy';
+    if (row >= 6 && row <= 8 && col <= 2) return 'Janpath Metro & Market Transit Node';
+    if (row >= 3 && row <= 5 && col <= 2) return 'Central Secretariat / Udyog Bhawan Complex';
+    if (row >= 7 && col >= 3 && col <= 6) return 'Central Vista Lawn & Water Canal';
+    if (row >= 7 && col >= 7) return 'Shahjahan Road Protected Green Verge';
+    return 'New Delhi Administrative Block';
+  }
+  if (sid.includes('pimpri') || sid.includes('bhosari')) {
+    if (row <= 1 && col >= 3 && col <= 6) return 'MIDC Bhosari Foundry & Metal Stamping Cluster';
+    if (row <= 2 && col <= 2) return 'Pune-Nashik Highway Logistics Transit Verge';
+    if (row <= 2 && col >= 7) return 'Auto Cluster R&D Test Track';
+    if (row >= 2 && row <= 3 && col >= 3 && col <= 6) return 'Heavy Industrial Fabrication Yard';
+    if (row >= 3 && row <= 5 && col <= 2) return 'Telco Road Green Buffer';
+    if (row >= 4 && row <= 6 && col >= 4 && col <= 7) return 'MSETCL 220kV High-Tension Transmission Corridor';
+    if (row >= 5 && row <= 7 && col >= 7) return 'Assembly & Sheet Metal Stamping Facility';
+    if (row >= 6 && row <= 7 && col <= 3) return 'Industrial Worker Canteen & Transit Hub';
+    if (row >= 8 && col <= 4) return 'Pavana River Riparian Buffer';
+    if (row >= 7 && col >= 6) return 'Spine Road Logistics Terminal';
+    return 'MIDC Industrial Unit';
+  }
   if (row <= 1 && col <= 3) return 'North Gate';
   if (row <= 3 && col >= 4 && col <= 7) return 'Academic Block';
   if (row >= 4 && row <= 6 && col >= 3 && col <= 6) return 'Central Plaza';
@@ -61,7 +96,29 @@ function namedZone(row: number, col: number): string {
   return 'Teaching Quad';
 }
 
-function cellContext(row: number, col: number): { landUse: Cell['landUse']; surfaceType: Cell['surfaceType']; capacity: number } {
+function cellContext(row: number, col: number, studyId = ''): { landUse: Cell['landUse']; surfaceType: Cell['surfaceType']; capacity: number } {
+  const sid = studyId.toLowerCase();
+  if (sid.includes('delhi')) {
+    if (row >= 4 && row <= 5 && col >= 3 && col <= 6) return { landUse: 'green_space', surfaceType: 'green', capacity: 4 };
+    if (row <= 1 && col >= 3 && col <= 6) return { landUse: 'pedestrian_zone', surfaceType: 'mixed', capacity: 4 };
+    if ((row >= 2 && row <= 3 && col >= 3 && col <= 6) || (row >= 3 && row <= 5 && col <= 2)) return { landUse: 'building', surfaceType: 'building', capacity: 0 };
+    if (row >= 4 && row <= 6 && col >= 7) return { landUse: 'green_space', surfaceType: 'green', capacity: 5 };
+    if (row >= 6 && row <= 8 && col <= 2) return { landUse: 'pedestrian_zone', surfaceType: 'paved', capacity: 3 };
+    if (row >= 7 && col >= 3 && col <= 6) return { landUse: 'green_space', surfaceType: 'soil', capacity: 4 };
+    if (row >= 7 && col >= 7) return { landUse: 'green_space', surfaceType: 'green', capacity: 5 };
+    return { landUse: 'mixed', surfaceType: 'mixed', capacity: 3 };
+  }
+  if (sid.includes('pimpri') || sid.includes('bhosari')) {
+    if ((row <= 1 && col >= 3 && col <= 6) || (row <= 2 && col >= 7)) return { landUse: 'parking', surfaceType: 'paved', capacity: 3 };
+    if (row <= 2 && col <= 2) return { landUse: 'road', surfaceType: 'paved', capacity: 2 };
+    if ((row >= 2 && row <= 3 && col >= 3 && col <= 6) || (row >= 5 && row <= 7 && col >= 7)) return { landUse: 'building', surfaceType: 'building', capacity: 0 };
+    if (row >= 3 && row <= 5 && col <= 2) return { landUse: 'green_space', surfaceType: 'green', capacity: 4 };
+    if (row >= 4 && row <= 6 && col >= 4 && col <= 7) return { landUse: 'mixed', surfaceType: 'soil', capacity: 2 };
+    if (row >= 6 && row <= 7 && col <= 3) return { landUse: 'pedestrian_zone', surfaceType: 'mixed', capacity: 3 };
+    if (row >= 8 && col <= 4) return { landUse: 'green_space', surfaceType: 'soil', capacity: 4 };
+    if (row >= 7 && col >= 6) return { landUse: 'parking', surfaceType: 'paved', capacity: 4 };
+    return { landUse: 'mixed', surfaceType: 'paved', capacity: 2 };
+  }
   if (row >= 7 && col <= 4) return { landUse: 'green_space', surfaceType: 'green', capacity: 5 };
   if (row >= 7 && col >= 7) return { landUse: 'sports', surfaceType: 'mixed', capacity: 3 };
   if ((row === 4 || row === 5) && (col === 4 || col === 5)) return { landUse: 'plaza', surfaceType: 'paved', capacity: 4 };
@@ -74,8 +131,9 @@ function cellContext(row: number, col: number): { landUse: Cell['landUse']; surf
   return { landUse: 'mixed', surfaceType: 'mixed', capacity: 3 };
 }
 
-export function createGrid(study: StudyArea = DEFAULT_STUDY, seed = 20261010): Cell[] {
-  const random = randomFromSeed(seed);
+export function createGrid(study: StudyArea = DEFAULT_STUDY, seed?: number): Cell[] {
+  const actualSeed = seed ?? hashSeed(study.id);
+  const random = randomFromSeed(actualSeed);
   const cells: Cell[] = [];
   const halfLat = study.cellSizeLat / 2;
   const halfLng = study.cellSizeLng / 2;
@@ -93,8 +151,8 @@ export function createGrid(study: StudyArea = DEFAULT_STUDY, seed = 20261010): C
       const corners = unrotatedCorners.map((point) => rotatePoint(point[0], point[1], study.origin, study.rotation));
       const firstCorner = corners[0];
       const polygon = firstCorner ? [...corners, firstCorner] : corners;
-      const context = cellContext(row, col);
-      const zone = namedZone(row, col);
+      const context = cellContext(row, col, study.id);
+      const zone = namedZone(row, col, study.id);
       const urbanFactor = context.surfaceType === 'paved' ? 0.20 : context.surfaceType === 'green' ? -0.18 : 0;
       const pedestrianFactor = ['plaza', 'pedestrian_zone', 'road'].includes(context.landUse) ? 0.2 : context.landUse === 'building' ? -0.08 : 0;
       const heat = clamp(0.28 + (row / Math.max(1, study.rows - 1)) * 0.30 + urbanFactor + (random() - 0.5) * 0.25);

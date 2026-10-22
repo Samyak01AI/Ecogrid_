@@ -1,0 +1,40 @@
+{
+  "type": "FeatureCollection",
+  "name": "Central Vista Canals & Waterways",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Kartavya Path Water Canals",
+        "type": "water_body"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              77.211,
+              28.6143
+            ],
+            [
+              77.227,
+              28.6143
+            ],
+            [
+              77.227,
+              28.615
+            ],
+            [
+              77.211,
+              28.615
+            ],
+            [
+              77.211,
+              28.6143
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

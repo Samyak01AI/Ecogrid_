@@ -1,0 +1,40 @@
+{
+  "type": "FeatureCollection",
+  "name": "Pavana River Channel & Natural Wetlands",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Pavana River Main Channel",
+        "type": "river_channel"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              73.784,
+              18.624
+            ],
+            [
+              73.805,
+              18.624
+            ],
+            [
+              73.805,
+              18.6272
+            ],
+            [
+              73.784,
+              18.6272
+            ],
+            [
+              73.784,
+              18.624
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

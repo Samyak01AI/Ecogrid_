@@ -519,14 +519,22 @@ def evaluate_tree_safety_and_feasibility(cell: CellResponse) -> tuple[bool, list
     if road_clearance < 2.5:
         violations.append(f"SAFETY VIOLATION: Roadway sightline setback ({road_clearance:.1f} m) below mandatory 2.5 m vehicular safety buffer")
 
-    # 6. Water body / shipping channel restriction
+    # 6. Water body / canal / river channel restriction
     flags = getattr(cell, "provenance_flags", []) or []
-    if "WATER_BODY_VETO" in flags or cell.capacity == 0 or "Water" in cell.area_name or "Wetland" in cell.area_name:
-        violations.append("FORBIDDEN: Cell intersects navigable water channel or tidal wetland; terrestrial tree planting prohibited")
+    if "WATER_BODY_VETO" in flags or cell.capacity == 0 or "Water" in cell.area_name or "Wetland" in cell.area_name or "River" in cell.area_name:
+        violations.append("FORBIDDEN: Cell intersects classified water body, canal, or river channel; terrestrial tree planting prohibited")
 
-    # 7. Aviation / Naval Airfield Runway restriction (Obstacle Limitation Surface)
+    # 7. Aviation / Runway Obstacle Limitation Surface
     if "AVIATION_OLS_RESTRICTION" in flags or "Airfield" in cell.area_name or "Runway" in cell.area_name:
         violations.append("FORBIDDEN: Civil/Military Aviation Obstacle Limitation Surface (OLS) - vertical canopy prohibited on active runway")
+
+    # 8. High-Tension Transmission Lines (e.g., MSETCL 220kV Corridor in Pimpri)
+    if "OVERHEAD_HT_RESTRICTION" in flags:
+        violations.append("SAFETY VIOLATION: Located within 220kV High-Tension transmission corridor easement; trees prohibited under Indian Electricity Rules")
+
+    # 9. Heritage Sightline Protection (Central Vista Delhi)
+    if "HERITAGE_RESTRICTION" in flags:
+        violations.append("STATUTORY RESTRICTION: Central Vista heritage protection zone; unapproved vertical canopy planting restricted")
 
     is_safe = len(violations) == 0
     return is_safe, violations
