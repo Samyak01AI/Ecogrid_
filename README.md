@@ -4,6 +4,8 @@
 
 > The default Bengaluru East campus scores and named zones are deterministic illustrative planning inputs, not field measurements or engineering advice.
 
+> 📖 **Complete Architecture, Workflow & Setup Guide**: For a comprehensive breakdown of the 9-stage architectural pipeline, complete library purpose matrix, and step-by-step setup commands in `sh` and `bash`, see [WORKFLOW_AND_SETUP.md](WORKFLOW_AND_SETUP.md).
+
 ---
 
 ## Architecture
