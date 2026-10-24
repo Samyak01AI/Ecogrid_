@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import type { Cell, OptimizerResult } from '@ecogrid/domain';
 import {
   WandSparkles,
   RefreshCw,
@@ -9,9 +10,6 @@ import {
   Check,
   AlertTriangle,
   Cpu,
-  Layers,
-  ChevronRight,
-  ExternalLink,
   MessageSquare,
   X,
 } from 'lucide-react';
@@ -167,15 +165,13 @@ export function AIPoolStatusPill() {
 
 // ---------------------------------------------------------------------------
 // 1. AI Planning Assistant (Cell Inspector)
-// ---------------------------------------------------------------------------
-
 export function AIPlanningAssistant({
   cell,
   plan,
   studyId,
 }: {
-  cell: Record<string, any>;
-  plan?: Record<string, any> | null | undefined;
+  cell: Cell;
+  plan?: OptimizerResult | null | undefined;
   studyId: string;
 }) {
   const [loading, setLoading] = useState(false);
@@ -201,7 +197,7 @@ export function AIPlanningAssistant({
         plan,
       });
       setResponse(res);
-    } catch (err: any) {
+    } catch {
       setResponse({
         answer: `### Site Analysis for ${cell.id} (${cell.areaName || 'Site'})\n\n- **Heat Risk**: ${Math.round((cell.scores?.heat || 0) * 100)}/100 LST score\n- **Vegetation Deficit**: ${Math.round((cell.scores?.vegetation || 0) * 100)}/100 canopy gap\n- **Feasibility**: ${Math.round((cell.scores?.feasibility || 0) * 100)}/100 permeability\n- **Clearances**: Underground ${cell.undergroundClearance ?? 6.0}m (≥3.0m rule passed), Road setback ${cell.roadClearance ?? 8.0}m (≥2.5m rule passed).\n\n*Heuristic fallback active.*`,
         question: queryText,
@@ -350,14 +346,21 @@ export function AIPlanningAssistant({
 // 2. Scenario Explanation (Scenario Lab)
 // ---------------------------------------------------------------------------
 
+export interface AIScenarioScenarioInput {
+  budget?: number;
+  plan?: OptimizerResult | null;
+  weights?: unknown;
+  [key: string]: unknown;
+}
+
 export function AIScenarioExplainer({
   studyId,
   baseline,
   proposal,
 }: {
   studyId: string;
-  baseline: Record<string, any>;
-  proposal: Record<string, any>;
+  baseline: AIScenarioScenarioInput;
+  proposal: AIScenarioScenarioInput;
 }) {
   const [loading, setLoading] = useState(false);
   const [explanation, setExplanation] = useState<AIScenarioExplainResponse | null>(null);
@@ -505,7 +508,7 @@ export function AIImpactReportSummary({
 }: {
   studyId: string;
   studyName: string;
-  plan: Record<string, any> | null | undefined;
+  plan: OptimizerResult | null | undefined;
   budget: number;
 }) {
   const [loading, setLoading] = useState(false);
@@ -547,8 +550,9 @@ export function AIImpactReportSummary({
 
   useEffect(() => {
     if (plan) {
-      generateSummary();
+      void generateSummary();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studyId]);
 
   const handleCopy = () => {
@@ -662,7 +666,7 @@ export function AIValidationAssistant({
   budget,
 }: {
   studyId: string;
-  plan: Record<string, any> | null | undefined;
+  plan: OptimizerResult | null | undefined;
   budget: number;
 }) {
   const [open, setOpen] = useState(false);

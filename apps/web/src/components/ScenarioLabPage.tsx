@@ -1,38 +1,28 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowRight,
   ArrowUpRight,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Coins,
   FileBarChart,
-  FilePlus2,
   Flame,
   Footprints,
-  GitCompareArrows,
   Globe2,
-  Layers3,
   Network,
   RefreshCw,
   Save,
   ShieldCheck,
   Sliders,
-  Sparkles,
   Sprout,
-  Target,
-  TrendingUp,
   WandSparkles,
   X,
 } from 'lucide-react';
 import {
-  INTERVENTIONS,
   type Cell,
   type InterventionId,
   type OptimizerResult,
   type ScoreWeights,
-  type StudyArea,
   optimizePlan,
 } from '@ecogrid/domain';
 import { api } from '../api.js';
@@ -118,13 +108,12 @@ export function ScenarioLabPage({
   onSelectStudy,
   onOptimize,
 }: ScenarioLabPageProps) {
-  const { budget, weights: globalWeights, plan: globalPlan, setPlan, setLayer, pushToast, user } = useEcoStore();
+  const { budget, weights: globalWeights, setPlan, setLayer, pushToast, user } = useEcoStore();
 
   // Baseline A state
   const [leftBudget, setLeftBudget] = useState<number>(() => Math.round(budget * 0.62));
-  const [leftPreset, setLeftPreset] = useState<string>('conservative');
-  const [leftWeights, setLeftWeights] = useState<ScoreWeights>({ heat: 25, vegetation: 40, pedestrian: 20, connectivity: 15 });
-  const [leftInterventions, setLeftInterventions] = useState<InterventionId[]>(['native_trees', 'shade_structure', 'pollinator_corridor']);
+  const leftWeights: ScoreWeights = useMemo(() => ({ heat: 25, vegetation: 40, pedestrian: 20, connectivity: 15 }), []);
+  const leftInterventions: InterventionId[] = useMemo(() => ['native_trees', 'shade_structure', 'pollinator_corridor'], []);
 
   // Proposal B state
   const [rightBudget, setRightBudget] = useState<number>(budget);

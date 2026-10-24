@@ -4,22 +4,17 @@ import {
   Check,
   CircleHelp,
   Flame,
-  Gauge,
   GitCompareArrows,
-  Layers3,
   Leaf,
-  MoreHorizontal,
   RefreshCw,
   Scan,
   ShieldAlert,
   ShieldCheck,
   Sprout,
   Target,
-  TreeDeciduous,
   WandSparkles,
   Wind,
   X,
-  ExternalLink,
 } from 'lucide-react';
 import {
   INTERVENTIONS,
@@ -73,14 +68,12 @@ type InspectorRejected = {
 
 export function CellInspector({
   cell,
-  allCells = [],
   comparison = [],
   studyId,
   plan,
   budget,
   onClose,
   onPlan,
-  onSelectCell,
 }: CellInspectorProps) {
   const score = combinedPriority(cell.scores);
   const band = riskBand(score);

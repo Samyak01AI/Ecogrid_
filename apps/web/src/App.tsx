@@ -3,9 +3,9 @@ import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from
 import {
   Activity, ArrowRight, ArrowUpRight, ArrowUpRightFromSquare, BarChart3, Check, CheckCircle2, ChevronDown,
   ChevronRight, CircleHelp, CloudSun, Database, Download, ExternalLink, FileBarChart, FileDown,
-  FileJson2, FilePlus2, Flame, Gauge, GitCompareArrows, Globe2, Grid2X2, HandCoins, KeyRound, Leaf, LeafyGreen,
-  Lock, LogIn, LogOut, Mail, Menu, MoreHorizontal, RefreshCw, Search, Settings2, ShieldAlert, ShieldCheck,
-  Share2, SlidersHorizontal, Sprout, Sun, Target, TreeDeciduous, Upload, UserCheck, UserRound, UsersRound, WandSparkles, Wind, X,
+  FileJson2, FilePlus2, Flame, Gauge, GitCompareArrows, Globe2, Grid2X2, HandCoins, Leaf, LeafyGreen,
+  Lock, LogIn, LogOut, Mail, Menu, MoreHorizontal, RefreshCw, Search, Settings2, ShieldCheck,
+  Share2, SlidersHorizontal, Sprout, Sun, Target, TreeDeciduous, Upload, UserRound, UsersRound, WandSparkles, Wind, X,
   Scan,
 } from 'lucide-react';
 import {
@@ -15,7 +15,6 @@ import {
 import { api, type AdminUserItem, type Scenario, type UserSession } from './api.js';
 import { useEcoStore } from './useEcoStore.js';
 import {
-  AIPlanningAssistant,
   AIScenarioExplainer,
   AIImpactReportSummary,
   AIValidationAssistant,
