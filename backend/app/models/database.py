@@ -37,6 +37,51 @@ class Base(DeclarativeBase):
     pass
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String(128), primary_key=True)
+    full_name = Column(String(256), nullable=False)
+    email = Column(String(256), unique=True, index=True, nullable=False)
+    password_hash = Column(String(512), nullable=False)
+    role = Column(String(32), default="viewer", nullable=False)  # 'admin', 'planner', 'viewer'
+    is_active = Column(Boolean, default=True, nullable=False)
+    email_verified = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    sessions = relationship("SessionRecord", back_populates="user", cascade="all, delete-orphan")
+    reset_tokens = relationship("PasswordResetToken", back_populates="user", cascade="all, delete-orphan")
+
+
+class SessionRecord(Base):
+    __tablename__ = "sessions"
+
+    id = Column(String(128), primary_key=True)
+    user_id = Column(String(128), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash = Column(String(128), unique=True, index=True, nullable=False)
+    ip_address = Column(String(64), nullable=True)
+    user_agent = Column(String(512), nullable=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user = relationship("User", back_populates="sessions")
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(String(128), primary_key=True)
+    user_id = Column(String(128), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash = Column(String(128), unique=True, index=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user = relationship("User", back_populates="reset_tokens")
+
+
 class StudyArea(Base):
     __tablename__ = "study_areas"
 
@@ -49,6 +94,8 @@ class StudyArea(Base):
     cell_size_lat = Column(Float, nullable=False)
     cell_size_lng = Column(Float, nullable=False)
     data_label = Column(String(128), default="SYNTHETIC / DEMO")
+    owner_id = Column(String(128), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    is_public = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     cells = relationship("GridCell", back_populates="study_area", cascade="all, delete-orphan")
@@ -213,6 +260,17 @@ def init_db(engine=None):
             for col_name, col_def in cols:
                 try:
                     conn.execute(text(f"ALTER TABLE optimization_runs ADD COLUMN IF NOT EXISTS {col_name} {col_def};"))
+                    conn.commit()
+                except Exception:
+                    pass
+
+            study_cols = [
+                ("owner_id", "VARCHAR(128) REFERENCES users(id) ON DELETE SET NULL"),
+                ("is_public", "BOOLEAN DEFAULT TRUE"),
+            ]
+            for col_name, col_def in study_cols:
+                try:
+                    conn.execute(text(f"ALTER TABLE study_areas ADD COLUMN IF NOT EXISTS {col_name} {col_def};"))
                     conn.commit()
                 except Exception:
                     pass

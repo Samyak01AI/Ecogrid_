@@ -1,22 +1,70 @@
 import type { Cell, ConnectivityResult, InterventionId, OptimizerInput, OptimizerResult, ScoreWeights, StudyArea, WhatIfResult } from '@ecogrid/domain';
 
+function getCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(new RegExp('(^|;\\s*)(' + name + ')=([^;]*)'));
+  return match && match[3] !== undefined ? decodeURIComponent(match[3]) : null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { credentials: 'include', ...init, headers: { 'content-type': 'application/json', ...init?.headers } });
+  const method = (init?.method || 'GET').toUpperCase();
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+
+  // Attach double-submit CSRF token for state-changing requests when cookie is present
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    const csrfToken = getCookie('ecogrid_csrf');
+    if (csrfToken && !headers['X-CSRF-Token']) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
+  }
+
+  const response = await fetch(path, {
+    credentials: 'include',
+    ...init,
+    headers,
+  });
+
   if (!response.ok) {
     const data: unknown = await response.json().catch(() => null);
-    const message = typeof data === 'object' && data !== null && 'error' in data && typeof data.error === 'string' ? data.error : `Request failed (${response.status})`;
+    const message =
+      typeof data === 'object' && data !== null && 'detail' in data && typeof (data as { detail: unknown }).detail === 'string'
+        ? (data as { detail: string }).detail
+        : typeof data === 'object' && data !== null && 'error' in data && typeof (data as { error: unknown }).error === 'string'
+        ? (data as { error: string }).error
+        : `Request failed (${response.status})`;
     throw new Error(message);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
-export type UserSession = { id: string; email: string; role: 'admin' | 'planner' | 'viewer' };
+export type UserSession = {
+  id: string;
+  email: string;
+  fullName: string;
+  role: 'admin' | 'planner' | 'viewer';
+  isActive?: boolean;
+  createdAt?: string;
+};
+
+export type AdminUserItem = {
+  id: string;
+  fullName: string;
+  email: string;
+  role: 'admin' | 'planner' | 'viewer';
+  isActive: boolean;
+  createdAt: string;
+};
+
 export type PlaceResult = { id: string; displayName: string; lat: number; lng: number; type: string };
 export type Scenario = { id: string; name: string; studyId: string; description?: string; budget: number; weights: ScoreWeights; enabledInterventions: readonly InterventionId[]; plan: OptimizerResult; createdAt: string };
 
 export const api = {
   health: () => request<{ ok: boolean; service: string; provider: string }>('/api/health'),
+  csrf: () => request<{ csrfToken: string }>('/api/auth/csrf'),
   studies: () => request<{ studies: (StudyArea & { cellCount: number })[] }>('/api/studies'),
   createStudy: (input: Omit<StudyArea, 'id'>) => request<{ study: StudyArea; cells: Cell[] }>('/api/studies', { method: 'POST', body: JSON.stringify(input) }),
   cells: (studyId: string) => request<{ study: StudyArea; count: number; polygons: number; cells: Cell[] }>(`/api/studies/${encodeURIComponent(studyId)}/cells`),
@@ -24,10 +72,40 @@ export const api = {
   connectivity: (studyId: string) => request<ConnectivityResult>(`/api/connectivity?studyId=${encodeURIComponent(studyId)}`),
   optimize: (input: OptimizerInput & { studyId?: string }) => request<OptimizerResult>('/api/optimize', { method: 'POST', body: JSON.stringify(input) }),
   whatIf: (input: { studyId?: string; cellId: string; interventionId: InterventionId; quantity: number }) => request<WhatIfResult>('/api/whatif', { method: 'POST', body: JSON.stringify(input) }),
-  register: (email: string, password: string) => request<{ user: UserSession }>('/api/auth/register', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  register: (
+    param1: string | { fullName: string; email: string; password: string; confirmPassword?: string },
+    param2?: string,
+  ) => {
+    if (typeof param1 === 'object') {
+      return request<{ user: UserSession }>('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({
+          full_name: param1.fullName,
+          email: param1.email,
+          password: param1.password,
+          confirm_password: param1.confirmPassword || param1.password,
+        }),
+      });
+    }
+    return request<{ user: UserSession }>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        full_name: param1.split('@')[0] || 'User',
+        email: param1,
+        password: param2 ?? '',
+        confirm_password: param2 ?? '',
+      }),
+    });
+  },
   login: (email: string, password: string) => request<{ user: UserSession }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   currentUser: () => request<UserSession>('/api/auth/me'),
-  logout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
+  logout: () => request<{ ok: boolean; message?: string }>('/api/auth/logout', { method: 'POST' }),
+  forgotPassword: (email: string) => request<{ ok: boolean; message: string; dev_reset_token?: string }>('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
+  resetPassword: (input: { token: string; newPassword: string; confirmPassword: string }) => request<{ ok: boolean; message: string }>('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ token: input.token, new_password: input.newPassword, confirm_password: input.confirmPassword }) }),
+  changePassword: (input: { currentPassword: string; newPassword: string; confirmPassword: string }) => request<{ ok: boolean; message: string }>('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ current_password: input.currentPassword, new_password: input.newPassword, confirm_password: input.confirmPassword }) }),
+  adminUsers: () => request<{ users: AdminUserItem[] }>('/api/admin/users'),
+  adminUpdateRole: (userId: string, role: 'admin' | 'planner' | 'viewer') => request<{ user: AdminUserItem }>(`/api/admin/users/${encodeURIComponent(userId)}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }),
+  adminUpdateStatus: (userId: string, isActive: boolean) => request<{ user: AdminUserItem }>(`/api/admin/users/${encodeURIComponent(userId)}/status`, { method: 'PATCH', body: JSON.stringify({ is_active: isActive }) }),
   scenarios: (studyId: string) => request<{ scenarios: Scenario[] }>(`/api/scenarios?studyId=${encodeURIComponent(studyId)}`),
   confidence: (studyId: string) => request<{ mean: number; p10: number; p90: number; lowCount: number }>(`/api/studies/${encodeURIComponent(studyId)}/confidence`),
   recomputeConfidence: (studyId: string) => request<{ recomputed: number; mean: number; p10: number; p90: number; lowCount: number }>(`/api/studies/${encodeURIComponent(studyId)}/confidence/recompute`, { method: 'POST', body: '{}' }),

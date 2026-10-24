@@ -3,7 +3,15 @@ import AppShell from '../App.js';
 
 export default function ApplicationRoutes() {
   const { pathname } = useLocation();
-  if (pathname === '/' || pathname === '/login') return <AppShell />;
+  if (
+    pathname === '/' ||
+    pathname === '/login' ||
+    pathname === '/register' ||
+    pathname === '/forgot-password' ||
+    pathname === '/reset-password'
+  ) {
+    return <AppShell />;
+  }
   return <Routes>
     <Route path="*" element={<AppShell />} />
     <Route path="/overview" element={<AppShell />} />
@@ -17,6 +25,7 @@ export default function ApplicationRoutes() {
     <Route path="/data-sources" element={<AppShell />} />
     <Route path="/methodology" element={<AppShell />} />
     <Route path="/settings" element={<AppShell />} />
+    <Route path="/admin/users" element={<AppShell />} />
     <Route path="/not-found" element={<Navigate to="/overview" replace />} />
   </Routes>;
 }

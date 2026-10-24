@@ -37,6 +37,28 @@ class Settings(BaseSettings):
     default_budget: float = 500000.0  # INR
     default_study_id: str = "study-bengaluru-east"
 
+    # Authentication & Session Security
+    environment: str = "development"
+    secret_key: str = "ecogrid-default-secret-key-replace-in-production-min-32-chars"
+    session_cookie_name: str = "ecogrid_session"
+    csrf_cookie_name: str = "ecogrid_csrf"
+    session_ttl_seconds: int = 604800  # 7 days
+    public_https: bool = False
+    rate_limit_login_attempts: int = 5
+    rate_limit_window_seconds: int = 300  # 5 minutes
+
+    # Seed Admin Account (optional bootstrap)
+    seed_admin_email: Optional[str] = "planner@example.test"
+    seed_admin_password: Optional[str] = None
+    seed_admin_name: str = "EcoGrid Lead Planner"
+
+    # SMTP Configuration (optional for password reset emails)
+    smtp_host: Optional[str] = None
+    smtp_port: int = 587
+    smtp_user: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_from: str = "noreply@ecogrid.ai"
+
     class Config:
         env_file = [".env", "../.env", "backend/.env"]
         env_file_encoding = "utf-8"

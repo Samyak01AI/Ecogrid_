@@ -12,6 +12,10 @@ services:
         fromDatabase:
           name: ecogrid-db
           property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: PUBLIC_HTTPS
+        value: "true"
       - key: WEB_ORIGIN
         value: "*"
       - key: PYTHON_VERSION

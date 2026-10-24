@@ -3,16 +3,16 @@ import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from
 import {
   Activity, ArrowRight, ArrowUpRight, ArrowUpRightFromSquare, BarChart3, Check, CheckCircle2, ChevronDown,
   ChevronRight, CircleHelp, CloudSun, Database, Download, ExternalLink, FileBarChart, FileDown,
-  FileJson2, FilePlus2, Flame, Gauge, GitCompareArrows, Globe2, Grid2X2, HandCoins, Leaf, LeafyGreen,
-  LogIn, LogOut, Menu, MoreHorizontal, RefreshCw, Search, Settings2, ShieldCheck,
-  Share2, SlidersHorizontal, Sprout, Sun, Target, TreeDeciduous, Upload, UserRound, UsersRound, WandSparkles, Wind, X,
+  FileJson2, FilePlus2, Flame, Gauge, GitCompareArrows, Globe2, Grid2X2, HandCoins, KeyRound, Leaf, LeafyGreen,
+  Lock, LogIn, LogOut, Mail, Menu, MoreHorizontal, RefreshCw, Search, Settings2, ShieldAlert, ShieldCheck,
+  Share2, SlidersHorizontal, Sprout, Sun, Target, TreeDeciduous, Upload, UserCheck, UserRound, UsersRound, WandSparkles, Wind, X,
   Scan,
 } from 'lucide-react';
 import {
   INTERVENTIONS, analyzeConnectivity, combinedPriority, optimizePlan, riskBand, simulateWhatIf,
   type Cell, type InterventionId, type OptimizerResult, type ScoreWeights,
 } from '@ecogrid/domain';
-import { api, type Scenario, type UserSession } from './api.js';
+import { api, type AdminUserItem, type Scenario, type UserSession } from './api.js';
 import { useEcoStore } from './useEcoStore.js';
 import {
   AIPlanningAssistant,
@@ -88,6 +88,7 @@ function AppFrame() {
   const [studyLoading, setStudyLoading] = useState(false);
   const [pngExporting, setPngExporting] = useState(false);
   const [scenarioComparison, setScenarioComparison] = useState<{ baseline: OptimizerResult; proposal: OptimizerResult } | null>(null);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.dataset.theme = lightTheme ? 'light' : 'dark';
@@ -294,8 +295,24 @@ function AppFrame() {
   };
   const handleLogout = async () => { try { await api.logout(); } finally { setUser(null); pushToast('You are signed out.', 'info'); navigate('/login'); } };
 
+  const navSections = useMemo(() => {
+    const list = [...SECTIONS];
+    if (user?.role === 'admin') {
+      list.push({
+        group: 'ADMINISTRATION',
+        items: [
+          { to: '/admin/users', label: 'User governance', icon: UsersRound, badge: 'ADMIN' },
+        ],
+      });
+    }
+    return list;
+  }, [user?.role]);
+
   if (location.pathname === '/') return <LandingPage />;
   if (location.pathname === '/login') return <LoginPage />;
+  if (location.pathname === '/register') return <RegisterPage />;
+  if (location.pathname === '/forgot-password') return <ForgotPasswordPage />;
+  if (location.pathname === '/reset-password') return <ResetPasswordPage />;
 
   return <div className={`app-frame ${sidebarOpen ? 'sidebar-open' : ''}`}>
     <div className="mobile-scrim" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
@@ -350,10 +367,22 @@ function AppFrame() {
         )}
       </div>
 
-      <div className="nav-scroll">{SECTIONS.map((section) => <div className="nav-group" key={section.group}><div className="nav-group-title">{section.group}</div>{section.items.map((item) => <NavLink key={item.to} to={item.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} aria-current={location.pathname === item.to ? 'page' : undefined}><item.icon size={16} strokeWidth={1.7} /><span>{item.label}</span>{'badge' in item && <small className="nav-live">{item.badge}</small>}{item.to === '/environment' && <span className="nav-count">{cells.length}</span>}</NavLink>)}</div>)}</div>
+      <div className="nav-scroll">{navSections.map((section) => <div className="nav-group" key={section.group}><div className="nav-group-title">{section.group}</div>{section.items.map((item) => <NavLink key={item.to} to={item.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} aria-current={location.pathname === item.to ? 'page' : undefined}><item.icon size={16} strokeWidth={1.7} /><span>{item.label}</span>{'badge' in item && <small className="nav-live">{item.badge}</small>}{item.to === '/environment' && <span className="nav-count">{cells.length}</span>}</NavLink>)}</div>)}</div>
       <div className="sidebar-budget"><div className="sidebar-budget-heading"><span>CLIMATE FUND <i>FY 2025</i></span><MoreHorizontal size={15} /></div><div className="budget-value">₹{(plan?.totalCost ?? 0).toLocaleString('en-IN')}<small> / ₹{budget.toLocaleString('en-IN')}</small></div><div className="budget-track"><i style={{ width: `${Math.min(100, plan?.utilization ? plan.utilization * 100 : 0)}%` }} /></div><div className="budget-footnote"><span>Budget allocated</span><span>{Math.round((plan?.utilization ?? 0) * 100)}%</span></div></div>
       <div className="sidebar-bottom"><NavLink to="/settings" className={({ isActive }) => `nav-item settings-link ${isActive ? 'active' : ''}`} onClick={() => setSidebarOpen(false)}><Settings2 size={16} /><span>Settings</span><span className="settings-live"><span />Synced</span></NavLink>
-        {user ? <button className="profile-card" type="button" onClick={() => void handleLogout()}><span className="profile-avatar">{user.email.slice(0, 1).toUpperCase()}</span><span><b>{user.email}</b><small>{user.role.toUpperCase()} · Sign out</small></span><LogOut size={14} /></button> : <Link className="profile-card" to="/login"><span className="profile-avatar profile-anonymous"><UserRound size={16} /></span><span><b>Demo workspace</b><small>VIEWER · Sign in to plan</small></span><LogIn size={14} /></Link>}
+        {user ? (
+          <button className="profile-card" type="button" onClick={() => setProfileModalOpen(true)}>
+            <span className="profile-avatar">{user.email.slice(0, 1).toUpperCase()}</span>
+            <span><b>{user.fullName || user.email}</b><small className={`role-badge role-badge-${user.role}`}>{user.role.toUpperCase()}</small></span>
+            <Settings2 size={14} />
+          </button>
+        ) : (
+          <Link className="profile-card" to="/login">
+            <span className="profile-avatar profile-anonymous"><UserRound size={16} /></span>
+            <span><b>Demo workspace</b><small>VIEWER · Sign in to plan</small></span>
+            <LogIn size={14} />
+          </Link>
+        )}
       </div>
     </aside>
     <main className={`app-main ${activeMap ? 'app-main-map' : ''}`}>
@@ -455,12 +484,14 @@ function AppFrame() {
               <Route path="/what-if" element={<Navigate to="/what-if" replace />} /><Route path="/connectivity" element={<Navigate to="/connectivity" replace />} />
               <Route path="/analytics" element={<Navigate to="/analytics" replace />} /><Route path="/reports" element={<ReportsPage cells={cells} plan={plan} studyId={activeStudyId} />} />
               <Route path="/data-sources" element={<><Suspense fallback={<div className="map-skeleton" role="status">Loading study setup…</div>}><StudySetup /></Suspense><DataSourcesPage cells={cells} studyId={activeStudyId} /></>} /><Route path="/methodology" element={<MethodologyPage />} /><Route path="/settings" element={<SettingsPage user={user} apiOnline={apiOnline} onLightTheme={() => setLightTheme((value) => !value)} lightTheme={lightTheme} />} />
+              <Route path="/admin/users" element={<AdminUsersPage />} />
               <Route path="*" element={<Navigate to="/overview" replace />} />
             </Routes>}
           </>
         )}
       </div>
     </main>
+    {profileModalOpen && user && <ProfileModal user={user} onClose={() => setProfileModalOpen(false)} onLogout={() => void handleLogout()} />}
     {comparisonOpen && <ScenarioCompareModal cells={cells} plan={plan} budget={budget} onClose={() => setComparisonOpen(false)} />}
     {toasts.length > 0 && <div className="toast-stack" aria-live="polite">{toasts.map((toast) => <div className={`toast toast-${toast.kind}`} key={toast.id}><span>{toast.kind === 'success' ? <CheckCircle2 size={17} /> : toast.kind === 'error' ? <CircleHelp size={17} /> : <Activity size={17} />}</span>{toast.message}<button type="button" aria-label="Dismiss notification" onClick={() => window.dispatchEvent(new CustomEvent('ecogrid-dismiss-toast', { detail: toast.id }))}><X size={15} /></button></div>)}</div>}
   </div>;
@@ -1118,23 +1149,740 @@ function ScenarioCompareModal({ cells, plan, budget, onClose }: { cells: Cell[];
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><section className="compare-modal" role="dialog" aria-modal="true" aria-labelledby="compare-title"><div className="modal-top"><div><span className="panel-kicker">SIDE-BY-SIDE SNAPSHOT</span><h2 id="compare-title">Compare climate futures.</h2></div><button className="icon-button" type="button" aria-label="Close scenario comparison" onClick={onClose}><X size={18} /></button></div><div className="compare-cards"><div><span>A / PRIORITY-FIRST</span><b>Heat relief first</b><strong>₹{baseline.totalCost.toLocaleString('en-IN')}</strong><small>{baseline.cellsImproved} cells · {baseline.selected.length} actions</small><div className="comparison-bars">{[baseline.categoryBenefits.heat, baseline.categoryBenefits.vegetation, baseline.categoryBenefits.pedestrian, baseline.categoryBenefits.connectivity].map((value, index) => <i key={index} style={{ height: `${Math.max(10, value * 800)}%` }} />)}</div></div><div className="compare-divider"><GitCompareArrows size={17} /></div><div className="proposal-card"><span>B / BALANCED</span><b>Multi-objective plan</b><strong>₹{balanced.totalCost.toLocaleString('en-IN')}</strong><small>{balanced.cellsImproved} cells · {balanced.selected.length} actions</small><div className="comparison-bars">{[balanced.categoryBenefits.heat, balanced.categoryBenefits.vegetation, balanced.categoryBenefits.pedestrian, balanced.categoryBenefits.connectivity].map((value, index) => <i key={index} style={{ height: `${Math.max(10, value * 800)}%` }} />)}</div></div></div><div className="modal-disclaimer"><ShieldCheck size={14} /> Comparisons reuse the same seeded scores; only weights and budget differ.</div><button className="button button-primary modal-done" type="button" onClick={onClose}>Back to the map <ArrowRight size={14} /></button></section></div>;
 }
 
+function PasswordChecklist({ password }: { password: string }) {
+  const hasMinLength = password.length >= 12;
+  const hasLower = /[a-z]/.test(password);
+  const hasUpper = /[A-Z]/.test(password);
+  const hasDigit = /[0-9]/.test(password);
+  const hasSymbol = /[^A-Za-z0-9]/.test(password);
+
+  return (
+    <div className="password-rules" aria-label="Password complexity criteria">
+      <div className={`password-rule ${hasMinLength ? 'met' : ''}`}>
+        {hasMinLength ? <Check size={12} /> : <span>•</span>}
+        <span>12+ characters</span>
+      </div>
+      <div className={`password-rule ${hasUpper && hasLower ? 'met' : ''}`}>
+        {hasUpper && hasLower ? <Check size={12} /> : <span>•</span>}
+        <span>Upper & lowercase</span>
+      </div>
+      <div className={`password-rule ${hasDigit ? 'met' : ''}`}>
+        {hasDigit ? <Check size={12} /> : <span>•</span>}
+        <span>At least 1 number</span>
+      </div>
+      <div className={`password-rule ${hasSymbol ? 'met' : ''}`}>
+        {hasSymbol ? <Check size={12} /> : <span>•</span>}
+        <span>Special symbol</span>
+      </div>
+    </div>
+  );
+}
+
 function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { setUser, pushToast } = useEcoStore();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [creatingAccount, setCreatingAccount] = useState(false);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState('');
+
+  const searchParams = new URLSearchParams(location.search);
+  const from = searchParams.get('from') || '/overview';
+
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); setError(''); setWorking(true);
+    event.preventDefault();
+    setError('');
+    setWorking(true);
     try {
-      const result = creatingAccount ? await api.register(email, password) : await api.login(email, password);
-      setUser(result.user); pushToast(`Signed in as ${result.user.role}.`, 'success'); navigate('/overview');
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not sign in. The API may be unavailable.'); }
-    setWorking(false);
+      const result = await api.login(email.trim(), password);
+      setUser(result.user);
+      pushToast(`Signed in as ${result.user.role.toUpperCase()}.`, 'success');
+      navigate(from);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Invalid credentials or service unavailable.');
+    } finally {
+      setWorking(false);
+    }
   };
-  return <div className="login-wrap"><Link to="/overview" className="login-brand"><BrandMark /><span><b>eco<span>grid</span></b><small>CLIMATE INTELLIGENCE</small></span></Link><div className="login-card"><span className="eyebrow">{creatingAccount ? 'NEW PLANNER ACCOUNT' : 'WORKSPACE ACCESS'}</span><h1>{creatingAccount ? 'Create your account.' : 'Pick up where the ground shifts.'}</h1><p>{creatingAccount ? 'New accounts start as viewers; ask your workspace admin for planner privileges.' : 'Sign in to save scenarios and run authenticated planning actions.'}</p><form onSubmit={(event) => void submit(event)}><label className="form-field"><span>EMAIL ADDRESS</span><input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.currentTarget.value)} placeholder="you@city.gov" /></label><label className="form-field"><span>PASSWORD <small>{creatingAccount ? '12 CHARACTERS MINIMUM' : ''}</small></span><input type="password" autoComplete={creatingAccount ? 'new-password' : 'current-password'} required minLength={creatingAccount ? 12 : 1} value={password} onChange={(event) => setPassword(event.currentTarget.value)} placeholder="••••••••••••" /></label>{error && <div className="form-error" role="alert">{error}</div>}<button className="button button-primary login-submit" type="submit" disabled={working}>{working ? <RefreshCw size={15} className="spin" /> : <LogIn size={15} />}{creatingAccount ? 'Create viewer account' : 'Sign in'}</button></form><button className="login-switch" type="button" onClick={() => { setCreatingAccount((value) => !value); setError(''); }}>{creatingAccount ? 'Already have a workspace account? Sign in' : 'New to this workspace? Create an account'}</button></div><Link to="/overview" className="login-demo-link">Continue with the deterministic local demo <ArrowRight size={13} /></Link><div className="login-footnote"><ShieldCheck size={13} /> Passwords are hashed and sessions use short-lived signed JWTs.</div></div>;
+
+  return (
+    <div className="login-wrap">
+      <Link to="/overview" className="login-brand">
+        <BrandMark />
+        <span><b>eco<span>grid</span></b><small>CLIMATE INTELLIGENCE</small></span>
+      </Link>
+      <div className="login-card">
+        <span className="eyebrow">WORKSPACE ACCESS</span>
+        <h1>Sign in to EcoGrid.</h1>
+        <p>Enter your credentials to access study areas, optimization runs, and project scenarios.</p>
+        <form onSubmit={(event) => void submit(event)}>
+          <label className="form-field">
+            <span>EMAIL ADDRESS</span>
+            <input
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.currentTarget.value)}
+              placeholder="you@institution.org"
+            />
+          </label>
+          <label className="form-field">
+            <span>PASSWORD</span>
+            <input
+              type="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(event) => setPassword(event.currentTarget.value)}
+              placeholder="••••••••••••"
+            />
+          </label>
+          <div className="login-links">
+            <Link to="/forgot-password" className="login-link">Forgot password?</Link>
+            <Link to="/register" className="login-link">Create account</Link>
+          </div>
+          {error && <div className="form-error" role="alert">{error}</div>}
+          <button className="button button-primary login-submit" type="submit" disabled={working}>
+            {working ? <RefreshCw size={15} className="spin" /> : <LogIn size={15} />}
+            Sign in
+          </button>
+        </form>
+        <button
+          className="login-switch"
+          type="button"
+          onClick={() => navigate('/register')}
+        >
+          New to this workspace? Register a new account
+        </button>
+      </div>
+      <Link to="/overview" className="login-demo-link">
+        Continue with public demonstration dataset <ArrowRight size={13} />
+      </Link>
+      <div className="login-footnote">
+        <ShieldCheck size={13} />
+        Argon2id password hashing · Cryptographically random server sessions · HttpOnly cookies
+      </div>
+    </div>
+  );
+}
+
+function RegisterPage() {
+  const navigate = useNavigate();
+  const { setUser, pushToast } = useEcoStore();
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError('');
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    if (password.length < 12) {
+      setError('Password must contain at least 12 characters.');
+      return;
+    }
+
+    setWorking(true);
+    try {
+      const result = await api.register({
+        fullName: fullName.trim(),
+        email: email.trim(),
+        password,
+        confirmPassword,
+      });
+      setUser(result.user);
+      pushToast('Account created successfully with Viewer privileges.', 'success');
+      navigate('/overview');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not create account. Please verify input.');
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="login-wrap">
+      <Link to="/overview" className="login-brand">
+        <BrandMark />
+        <span><b>eco<span>grid</span></b><small>CLIMATE INTELLIGENCE</small></span>
+      </Link>
+      <div className="login-card">
+        <span className="eyebrow">NEW USER REGISTRATION</span>
+        <h1>Create your account.</h1>
+        <p>New registrations receive a default Viewer role. Planners and Administrators can provision elevated project permissions.</p>
+        <form onSubmit={(event) => void submit(event)}>
+          <label className="form-field">
+            <span>FULL NAME</span>
+            <input
+              type="text"
+              autoComplete="name"
+              required
+              minLength={2}
+              maxLength={120}
+              value={fullName}
+              onChange={(event) => setFullName(event.currentTarget.value)}
+              placeholder="Dr. Jane Doe"
+            />
+          </label>
+          <label className="form-field">
+            <span>WORK EMAIL</span>
+            <input
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.currentTarget.value)}
+              placeholder="jane@climate.gov"
+            />
+          </label>
+          <label className="form-field">
+            <span>PASSWORD <small>12 CHARACTERS MINIMUM</small></span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={12}
+              value={password}
+              onChange={(event) => setPassword(event.currentTarget.value)}
+              placeholder="••••••••••••"
+            />
+          </label>
+          <PasswordChecklist password={password} />
+          <label className="form-field">
+            <span>CONFIRM PASSWORD</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={12}
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.currentTarget.value)}
+              placeholder="••••••••••••"
+            />
+          </label>
+          {error && <div className="form-error" role="alert">{error}</div>}
+          <button className="button button-primary login-submit" type="submit" disabled={working}>
+            {working ? <RefreshCw size={15} className="spin" /> : <LogIn size={15} />}
+            Create account
+          </button>
+        </form>
+        <button
+          className="login-switch"
+          type="button"
+          onClick={() => navigate('/login')}
+        >
+          Already have an account? Sign in
+        </button>
+      </div>
+      <Link to="/overview" className="login-demo-link">
+        Continue with public demonstration dataset <ArrowRight size={13} />
+      </Link>
+      <div className="login-footnote">
+        <ShieldCheck size={13} />
+        Public registration enforces least-privilege security. Administrator accounts cannot be created publicly.
+      </div>
+    </div>
+  );
+}
+
+function ForgotPasswordPage() {
+  const navigate = useNavigate();
+  const [email, setEmail] = useState('');
+  const [working, setWorking] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [devToken, setDevToken] = useState<string | null>(null);
+  const [error, setError] = useState('');
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError('');
+    setWorking(true);
+    try {
+      const res = await api.forgotPassword(email.trim());
+      setSubmitted(true);
+      if (res.dev_reset_token) {
+        setDevToken(res.dev_reset_token);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not submit password reset request.');
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="login-wrap">
+      <Link to="/overview" className="login-brand">
+        <BrandMark />
+        <span><b>eco<span>grid</span></b><small>CLIMATE INTELLIGENCE</small></span>
+      </Link>
+      <div className="login-card">
+        <span className="eyebrow">ACCOUNT RECOVERY</span>
+        <h1>Reset your password.</h1>
+        <p>Enter your verified email address. If an account exists, single-use reset instructions will be issued.</p>
+        {submitted ? (
+          <div>
+            <div className="form-success">
+              If an account with that email exists, reset instructions have been dispatched.
+            </div>
+            {devToken && (
+              <div className="dev-token-banner">
+                <b>Local Development Preview:</b> SMTP delivery is not configured.
+                <br />
+                Use this link for testing:
+                <br />
+                <Link to={`/reset-password?token=${encodeURIComponent(devToken)}`}>
+                  Proceed to Reset Password with Dev Token →
+                </Link>
+              </div>
+            )}
+            <button
+              className="button button-primary login-submit"
+              type="button"
+              style={{ marginTop: '16px' }}
+              onClick={() => navigate('/login')}
+            >
+              Return to sign in
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={(event) => void submit(event)}>
+            <label className="form-field">
+              <span>REGISTERED EMAIL</span>
+              <input
+                type="email"
+                autoComplete="email"
+                required
+                value={email}
+                onChange={(event) => setEmail(event.currentTarget.value)}
+                placeholder="you@institution.org"
+              />
+            </label>
+            {error && <div className="form-error" role="alert">{error}</div>}
+            <button className="button button-primary login-submit" type="submit" disabled={working}>
+              {working ? <RefreshCw size={15} className="spin" /> : <Mail size={15} />}
+              Send reset instructions
+            </button>
+          </form>
+        )}
+        <button
+          className="login-switch"
+          type="button"
+          onClick={() => navigate('/login')}
+        >
+          Remember your password? Sign in
+        </button>
+      </div>
+      <Link to="/overview" className="login-demo-link">
+        Continue with public demonstration dataset <ArrowRight size={13} />
+      </Link>
+      <div className="login-footnote">
+        <ShieldCheck size={13} />
+        Reset tokens expire in 15 minutes and can only be used once.
+      </div>
+    </div>
+  );
+}
+
+function ResetPasswordPage() {
+  const navigate = useNavigate();
+  const { pushToast } = useEcoStore();
+  const initialToken = new URLSearchParams(window.location.search).get('token') || '';
+  const [token, setToken] = useState(initialToken);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError('');
+
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    if (newPassword.length < 12) {
+      setError('Password must contain at least 12 characters.');
+      return;
+    }
+
+    setWorking(true);
+    try {
+      await api.resetPassword({
+        token: token.trim(),
+        newPassword,
+        confirmPassword,
+      });
+      pushToast('Password reset successfully. Please sign in with your new password.', 'success');
+      navigate('/login');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Invalid or expired reset token.');
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="login-wrap">
+      <Link to="/overview" className="login-brand">
+        <BrandMark />
+        <span><b>eco<span>grid</span></b><small>CLIMATE INTELLIGENCE</small></span>
+      </Link>
+      <div className="login-card">
+        <span className="eyebrow">CHOOSE NEW PASSWORD</span>
+        <h1>Set new password.</h1>
+        <p>Enter your single-use reset token and choose a new secure password.</p>
+        <form onSubmit={(event) => void submit(event)}>
+          <label className="form-field">
+            <span>RESET TOKEN</span>
+            <input
+              type="text"
+              required
+              value={token}
+              onChange={(event) => setToken(event.currentTarget.value)}
+              placeholder="Paste 64-character token"
+            />
+          </label>
+          <label className="form-field">
+            <span>NEW PASSWORD <small>12 CHARACTERS MINIMUM</small></span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={12}
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.currentTarget.value)}
+              placeholder="••••••••••••"
+            />
+          </label>
+          <PasswordChecklist password={newPassword} />
+          <label className="form-field">
+            <span>CONFIRM NEW PASSWORD</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={12}
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.currentTarget.value)}
+              placeholder="••••••••••••"
+            />
+          </label>
+          {error && <div className="form-error" role="alert">{error}</div>}
+          <button className="button button-primary login-submit" type="submit" disabled={working}>
+            {working ? <RefreshCw size={15} className="spin" /> : <Lock size={15} />}
+            Update password
+          </button>
+        </form>
+        <button
+          className="login-switch"
+          type="button"
+          onClick={() => navigate('/login')}
+        >
+          Cancel and return to sign in
+        </button>
+      </div>
+      <div className="login-footnote">
+        <ShieldCheck size={13} />
+        All existing sessions are revoked upon password reset.
+      </div>
+    </div>
+  );
+}
+
+function ProfileModal({
+  user,
+  onClose,
+  onLogout,
+}: {
+  user: UserSession;
+  onClose: () => void;
+  onLogout: () => void;
+}) {
+  const { pushToast } = useEcoStore();
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState('');
+
+  const handlePasswordChange = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError('');
+
+    if (newPassword !== confirmPassword) {
+      setError('New passwords do not match.');
+      return;
+    }
+    if (newPassword.length < 12) {
+      setError('Password must contain at least 12 characters.');
+      return;
+    }
+
+    setWorking(true);
+    try {
+      await api.changePassword({ currentPassword, newPassword, confirmPassword });
+      pushToast('Password updated successfully. Other active sessions were invalidated.', 'success');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not change password.');
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title">
+        <div className="profile-header">
+          <div>
+            <span className="panel-kicker">USER ACCOUNT</span>
+            <h2 id="profile-title">{user.fullName || 'User Profile'}</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close profile modal" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="profile-meta">
+          <div className="profile-meta-row">
+            <span className="profile-meta-label">Email</span>
+            <span className="profile-meta-value">{user.email}</span>
+          </div>
+          <div className="profile-meta-row">
+            <span className="profile-meta-label">Role</span>
+            <span className={`role-badge role-badge-${user.role}`}>
+              {user.role.toUpperCase()}
+            </span>
+          </div>
+          <div className="profile-meta-row">
+            <span className="profile-meta-label">Account Status</span>
+            <span className="profile-meta-value" style={{ color: '#4CC38A' }}>
+              ● ACTIVE
+            </span>
+          </div>
+          <div className="profile-meta-row">
+            <span className="profile-meta-label">User Identifier</span>
+            <code style={{ fontSize: '11px', color: 'var(--muted)' }}>{user.id}</code>
+          </div>
+        </div>
+
+        <form onSubmit={(e) => void handlePasswordChange(e)}>
+          <span className="panel-kicker" style={{ display: 'block', marginBottom: '8px' }}>
+            CHANGE PASSWORD
+          </span>
+          <div style={{ display: 'grid', gap: '10px' }}>
+            <label className="form-field">
+              <span>CURRENT PASSWORD</span>
+              <input
+                type="password"
+                required
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.currentTarget.value)}
+                placeholder="Current password"
+              />
+            </label>
+            <label className="form-field">
+              <span>NEW PASSWORD <small>12 CHARACTERS MINIMUM</small></span>
+              <input
+                type="password"
+                required
+                minLength={12}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.currentTarget.value)}
+                placeholder="New password"
+              />
+            </label>
+            <PasswordChecklist password={newPassword} />
+            <label className="form-field">
+              <span>CONFIRM NEW PASSWORD</span>
+              <input
+                type="password"
+                required
+                minLength={12}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.currentTarget.value)}
+                placeholder="Confirm new password"
+              />
+            </label>
+          </div>
+          {error && <div className="form-error" style={{ marginTop: '8px' }} role="alert">{error}</div>}
+          <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+            <button className="button button-primary" type="submit" disabled={working} style={{ flex: 1 }}>
+              {working ? <RefreshCw size={14} className="spin" /> : <Lock size={14} />}
+              Update password
+            </button>
+            <button className="button button-quiet" type="button" onClick={onLogout} style={{ color: 'var(--red)' }}>
+              <LogOut size={14} />
+              Sign out
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function AdminUsersPage() {
+  const { user, pushToast } = useEcoStore();
+  const navigate = useNavigate();
+  const [users, setUsers] = useState<AdminUserItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const loadUsers = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await api.adminUsers();
+      setUsers(res.users);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not fetch user directory.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user?.role === 'admin') {
+      void loadUsers();
+    }
+  }, [loadUsers, user?.role]);
+
+  if (!user || user.role !== 'admin') {
+    return (
+      <div className="document-page">
+        <SectionTitle
+          eyebrow="ADMINISTRATIVE GOVERNANCE"
+          title="Access Restricted"
+          subtitle="Administrator authorization is required to access user directory and manage account roles."
+        />
+        <div style={{ marginTop: '20px' }}>
+          <button className="button button-primary" type="button" onClick={() => navigate('/login')}>
+            Sign in as Administrator
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const handleRoleChange = async (targetUserId: string, newRole: 'admin' | 'planner' | 'viewer') => {
+    try {
+      const res = await api.adminUpdateRole(targetUserId, newRole);
+      setUsers((prev) => prev.map((u) => (u.id === targetUserId ? res.user : u)));
+      pushToast(`Role updated to ${newRole.toUpperCase()}.`, 'success');
+    } catch (caught) {
+      pushToast(caught instanceof Error ? caught.message : 'Failed to update role.', 'error');
+    }
+  };
+
+  const handleStatusToggle = async (targetUserId: string, currentActive: boolean) => {
+    try {
+      const res = await api.adminUpdateStatus(targetUserId, !currentActive);
+      setUsers((prev) => prev.map((u) => (u.id === targetUserId ? res.user : u)));
+      pushToast(`Account ${!currentActive ? 'activated' : 'suspended'}.`, 'success');
+    } catch (caught) {
+      pushToast(caught instanceof Error ? caught.message : 'Failed to update status.', 'error');
+    }
+  };
+
+  return (
+    <div className="document-page">
+      <SectionTitle
+        eyebrow="SYSTEM GOVERNANCE"
+        title="User directory & roles."
+        subtitle="Manage user accounts, elevate planner permissions, and govern workspace access."
+        actions={
+          <button className="button button-quiet" type="button" onClick={() => void loadUsers()} disabled={loading}>
+            <RefreshCw size={14} className={loading ? 'spin' : ''} />
+            Refresh
+          </button>
+        }
+      />
+
+      {error && <div className="form-error" style={{ marginBottom: '14px' }}>{error}</div>}
+
+      <div className="admin-table-wrap">
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th>USER</th>
+              <th>EMAIL</th>
+              <th>ROLE</th>
+              <th>STATUS</th>
+              <th>REGISTERED</th>
+              <th>ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.id}>
+                <td>
+                  <b>{u.fullName}</b>
+                  <div style={{ fontSize: '10px', color: 'var(--muted)' }}>{u.id}</div>
+                </td>
+                <td>{u.email}</td>
+                <td>
+                  <select
+                    className="role-select"
+                    value={u.role}
+                    disabled={u.id === user.id}
+                    onChange={(e) => void handleRoleChange(u.id, e.target.value as 'admin' | 'planner' | 'viewer')}
+                    title={u.id === user.id ? 'Cannot change your own role' : 'Select role'}
+                  >
+                    <option value="viewer">VIEWER</option>
+                    <option value="planner">PLANNER</option>
+                    <option value="admin">ADMIN</option>
+                  </select>
+                </td>
+                <td>
+                  <span
+                    className={`role-badge ${u.isActive ? 'role-badge-planner' : 'role-badge-admin'}`}
+                    style={{ fontSize: '9.5px' }}
+                  >
+                    {u.isActive ? 'ACTIVE' : 'SUSPENDED'}
+                  </span>
+                </td>
+                <td style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                  {new Date(u.createdAt).toLocaleDateString()}
+                </td>
+                <td>
+                  {u.id !== user.id && (
+                    <button
+                      type="button"
+                      className={`status-toggle ${u.isActive ? 'status-suspended' : 'status-active'}`}
+                      onClick={() => void handleStatusToggle(u.id, u.isActive)}
+                    >
+                      {u.isActive ? 'Suspend' : 'Reactivate'}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 function LandingPage() {

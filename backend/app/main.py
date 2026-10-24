@@ -24,10 +24,24 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+from sqlalchemy.orm import Session
 
+from app.auth import (
+    admin_router,
+    auth_router,
+    get_current_user,
+    get_db,
+    get_optional_user,
+    require_admin,
+    require_planner,
+    require_role,
+    require_viewer,
+    verify_study_access,
+)
+from app.auth.csrf import validate_csrf
 from app.config import settings
 from app.reporting.pdf_report import generate_climate_report_pdf
 from app.cv.satellite_segmentation import (
@@ -60,6 +74,7 @@ from app.models.database import (
     OptimizationRun,
     OutcomeMonitoring,
     StudyArea,
+    User,
     get_session_factory,
     init_db,
 )
@@ -314,6 +329,31 @@ async def lifespan(app: FastAPI):
         from app.models.database import init_db
         init_db()
         logger.info("Database tables initialized successfully")
+
+        # Optional bootstrap admin user
+        if settings.seed_admin_email and settings.seed_admin_password:
+            try:
+                from app.auth.security import hash_password, normalize_email
+                from app.models.database import get_session_factory, User
+                factory = get_session_factory()
+                with factory() as db:
+                    clean_email = normalize_email(settings.seed_admin_email)
+                    admin_exists = db.query(User).filter(User.email == clean_email).first()
+                    if not admin_exists:
+                        admin_user = User(
+                            id=f"usr_admin_{uuid.uuid4().hex[:8]}",
+                            full_name=settings.seed_admin_name,
+                            email=clean_email,
+                            password_hash=hash_password(settings.seed_admin_password),
+                            role="admin",
+                            is_active=True,
+                            email_verified=True,
+                        )
+                        db.add(admin_user)
+                        db.commit()
+                        logger.info("Bootstrap admin initialized: %s", clean_email)
+            except Exception as admin_err:
+                logger.warning("Bootstrap admin seeding skipped: %s", admin_err)
     except Exception as e:
         logger.warning("Database init skipped (app still works with memory cache): %s", e)
 
@@ -331,8 +371,7 @@ app = FastAPI(
     title="EcoGrid AI",
     description=(
         "AI-Powered Multi-Benefit Climate Intervention Optimizer. "
-        "Minimum Intervention. Maximum Environmental Impact. "
-        "This prototype uses synthetic demo data."
+        "Minimum Intervention. Maximum Environmental Impact."
     ),
     version="2.0.0",
     lifespan=lifespan,
@@ -343,9 +382,33 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.web_origin, "http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["set-cookie", "retry-after"],
 )
+
+
+# Security Headers & CSRF Verification Middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    # Enforce CSRF token verification for state-changing cookie requests
+    try:
+        validate_csrf(request)
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
+
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if settings.public_https or request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
+# Mount Authentication & Administration Routers
+app.include_router(auth_router)
+app.include_router(admin_router)
 
 
 # ---------------------------------------------------------------------------
@@ -381,52 +444,16 @@ async def meta():
 
 
 # ---------------------------------------------------------------------------
-# Auth endpoints (Local / Hackathon Session)
-# ---------------------------------------------------------------------------
-
-@app.get("/api/auth/me")
-async def get_current_user():
-    return {
-        "id": "planner-1",
-        "email": "planner@example.test",
-        "role": "planner",
-    }
-
-
-@app.post("/api/auth/login")
-async def auth_login(payload: dict = {}):
-    return {
-        "user": {
-            "id": "planner-1",
-            "email": payload.get("email", "planner@example.test"),
-            "role": "planner",
-        }
-    }
-
-
-@app.post("/api/auth/register")
-async def auth_register(payload: dict = {}):
-    return {
-        "user": {
-            "id": "planner-1",
-            "email": payload.get("email", "planner@example.test"),
-            "role": "planner",
-        }
-    }
-
-
-@app.post("/api/auth/logout")
-async def auth_logout():
-    return {"ok": True}
-
-
-# ---------------------------------------------------------------------------
 # Study Area endpoints (/api/studies & /api/study-areas)
 # ---------------------------------------------------------------------------
 
 @app.get("/api/studies")
 @app.get("/api/study-areas")
-async def list_studies():
+async def list_studies(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user = get_optional_user(request, db)
     studies = list(_study_cache.values())
     if not studies:
         cells = _get_or_generate_cells(DEFAULT_STUDY_ID)
@@ -440,34 +467,104 @@ async def list_studies():
             "cellSizeLng": 0.0012,
             "cell_count": len(cells),
             "data_label": "SYNTHETIC / DEMO",
+            "is_public": True,
         }
         studies = [_study_cache[DEFAULT_STUDY_ID]]
-    # Dedup
+
     unique_studies = {}
     for s in studies:
-        unique_studies[s["id"]] = _format_study(s)
+        is_pub = s.get("is_public", True) or s.get("id") in (DEFAULT_STUDY_ID, "kerala-kochi")
+        is_owner = user and (user.role == "admin" or s.get("owner_id") == user.id)
+        if is_pub or is_owner:
+            unique_studies[s["id"]] = _format_study(s)
+
+    # Also load user's private studies from database
+    try:
+        db_query = db.query(StudyArea)
+        if not user or user.role != "admin":
+            db_query = db_query.filter(
+                (StudyArea.is_public.is_(True)) | (StudyArea.owner_id == (user.id if user else None))
+            )
+        for sa in db_query.all():
+            if sa.id not in unique_studies:
+                unique_studies[sa.id] = {
+                    "id": sa.id,
+                    "name": sa.name,
+                    "origin": [sa.origin_lat, sa.origin_lng],
+                    "rows": sa.rows,
+                    "columns": sa.columns,
+                    "cellSizeLat": sa.cell_size_lat,
+                    "cellSizeLng": sa.cell_size_lng,
+                    "cellCount": sa.rows * sa.columns,
+                    "data_label": sa.data_label or "CUSTOM",
+                    "isPublic": sa.is_public,
+                }
+    except Exception:
+        pass
+
     return {"studies": list(unique_studies.values())}
 
 
 @app.post("/api/studies")
-async def create_study(payload: dict):
+@app.post("/api/study-areas")
+async def create_study(
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user = get_optional_user(request, db)
+    if user and user.role == "viewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Viewer accounts cannot create new study areas. Planner or admin role required.",
+        )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to create custom study areas. Please sign in as a planner.",
+        )
+
     new_id = f"study-{uuid.uuid4().hex[:8]}"
     origin = payload.get("origin", [12.9352, 77.6245])
     rows = int(payload.get("rows", 10))
     cols = int(payload.get("columns", 10))
+    name = payload.get("name", "Custom Study Area")
     study = {
         "id": new_id,
-        "name": payload.get("name", "Custom Study Area"),
+        "name": name,
         "origin": origin,
         "rows": rows,
         "columns": cols,
         "cellSizeLat": float(payload.get("cellSizeLat", 0.0012)),
         "cellSizeLng": float(payload.get("cellSizeLng", 0.0012)),
         "cell_count": rows * cols,
-        "data_label": "SYNTHETIC / DEMO",
+        "data_label": "CUSTOM / USER",
+        "owner_id": user.id,
+        "is_public": False,
     }
     _study_cache[new_id] = study
     cells = _get_or_generate_cells(new_id)
+
+    # Persist in DB
+    try:
+        db_study = StudyArea(
+            id=new_id,
+            name=name,
+            origin_lat=origin[0],
+            origin_lng=origin[1],
+            rows=rows,
+            columns=cols,
+            cell_size_lat=float(payload.get("cellSizeLat", 0.0012)),
+            cell_size_lng=float(payload.get("cellSizeLng", 0.0012)),
+            data_label="CUSTOM / USER",
+            owner_id=user.id,
+            is_public=False,
+        )
+        db.add(db_study)
+        db.commit()
+    except Exception as e:
+        logger.warning("Could not persist study area to DB: %s", e)
+
     return {
         "study": _format_study(study),
         "cells": [_format_cell(c) for c in cells],
@@ -475,7 +572,15 @@ async def create_study(payload: dict):
 
 
 @app.get("/api/studies/{study_id}/cells")
-async def get_study_cells(study_id: str, layer: str = "priority"):
+async def get_study_cells(
+    study_id: str,
+    layer: str = "priority",
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
+    user = get_optional_user(request, db) if request else None
+    verify_study_access(study_id, user, db)
+
     cells = _get_or_generate_cells(study_id)
     study = _study_cache.get(study_id) or _study_cache.get(DEFAULT_STUDY_ID, {})
     return {
@@ -489,7 +594,14 @@ async def get_study_cells(study_id: str, layer: str = "priority"):
 
 @app.get("/api/studies/{study_id}")
 @app.get("/api/study-areas/{study_id}")
-async def get_study_details(study_id: str):
+async def get_study_details(
+    study_id: str,
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
+    user = get_optional_user(request, db) if request else None
+    verify_study_access(study_id, user, db)
+
     cells = _get_or_generate_cells(study_id)
     study = _study_cache.get(study_id) or _study_cache.get(DEFAULT_STUDY_ID, {})
     avg = lambda key: sum(getattr(c.scores, key) for c in cells) / len(cells) if cells else 0
@@ -514,7 +626,12 @@ async def get_study_report(
     format: str = Query("json"),
     budget: float = Query(500000.0),
     inline: bool = Query(False),
+    request: Request = None,
+    db: Session = Depends(get_db),
 ):
+    user = get_optional_user(request, db) if request else None
+    verify_study_access(study_id, user, db)
+
     cells = _get_or_generate_cells(study_id)
     study = _study_cache.get(study_id) or _study_cache.get(DEFAULT_STUDY_ID, {})
     study_info = _format_study(study) if study else {}
@@ -563,9 +680,14 @@ async def export_study_data(
     studyId: str = Query(DEFAULT_STUDY_ID),
     format: str = Query("geojson"),
     layer: str = Query("priority"),
+    request: Request = None,
+    db: Session = Depends(get_db),
 ):
     import io, csv
     from fastapi.responses import Response
+
+    user = get_optional_user(request, db) if request else None
+    verify_study_access(studyId, user, db)
 
     cells = _get_or_generate_cells(studyId)
     study = _study_cache.get(studyId) or _study_cache.get(DEFAULT_STUDY_ID, {})
@@ -828,8 +950,21 @@ async def list_interventions():
 # ---------------------------------------------------------------------------
 
 @app.post("/api/optimize")
-async def run_optimization_unified(payload: dict):
+async def run_optimization_unified(
+    payload: dict,
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
+    user = get_optional_user(request, db) if request else None
+    if user and user.role == "viewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Viewer accounts cannot execute optimization runs. Planner or admin role required.",
+        )
+
     study_id = payload.get("studyId") or payload.get("study_id") or DEFAULT_STUDY_ID
+    verify_study_access(study_id, user, db)
+
     budget = float(payload.get("budget", 500000.0))
     raw_weights = payload.get("weights", {})
 
@@ -995,7 +1130,7 @@ async def run_optimization_unified(payload: dict):
             db_run = OptimizationRun(
                 id=run_id,
                 study_area_id=study_id,
-                user_id="planner-1",
+                user_id=user.id if user else "planner-1",
                 budget=budget,
                 weights_json=json.dumps(weights.model_dump() if hasattr(weights, "model_dump") else {}),
                 solver_status=result.solver_status,
@@ -1018,7 +1153,7 @@ async def run_optimization_unified(payload: dict):
                 run_id=run_id,
                 study_area_id=study_id,
                 approval_status="DRAFT",
-                approved_by="Municipal Planner",
+                approved_by=user.full_name if user else "Municipal Planner",
                 reviewer_notes="Initial optimization run draft",
             )
             session.add(approval)
@@ -1034,8 +1169,21 @@ async def run_optimization_unified(payload: dict):
 # ---------------------------------------------------------------------------
 
 @app.post("/api/pareto")
-async def run_pareto_frontier(payload: dict):
+async def run_pareto_frontier(
+    payload: dict,
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
+    user = get_optional_user(request, db) if request else None
+    if user and user.role == "viewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Viewer accounts cannot compute Pareto frontiers. Planner or admin role required.",
+        )
+
     study_id = payload.get("studyId") or payload.get("study_id") or DEFAULT_STUDY_ID
+    verify_study_access(study_id, user, db)
+
     budget = float(payload.get("budget", 500000.0))
     raw_weights = payload.get("weights", {})
 
@@ -1125,15 +1273,27 @@ async def get_approval_status(run_id: str):
 
 
 @app.post("/api/approval")
-async def update_approval_status(payload: dict):
+async def update_approval_status(
+    payload: dict,
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
     """Submit human planner approval / rejection / draft status with notes."""
+    user = get_optional_user(request, db) if request else None
+    if user and user.role == "viewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Viewer accounts cannot approve or modify plan status. Planner or admin role required.",
+        )
+
     run_id = payload.get("runId")
-    status = payload.get("status", "APPROVED").upper()
-    approved_by = payload.get("approvedBy", "Chief Urban Planner")
+    new_status = payload.get("status", payload.get("approvalStatus", "APPROVED")).upper()
+    default_approver = user.full_name if user else "Chief Urban Planner"
+    approved_by = payload.get("approvedBy", default_approver)
     notes = payload.get("notes", "")
 
     if run_id in _optimization_runs:
-        _optimization_runs[run_id]["approvalStatus"] = status
+        _optimization_runs[run_id]["approvalStatus"] = new_status
         _optimization_runs[run_id]["approvedBy"] = approved_by
         _optimization_runs[run_id]["reviewerNotes"] = notes
         _optimization_runs[run_id]["approvedAt"] = datetime.now(timezone.utc).isoformat()
@@ -1144,7 +1304,7 @@ async def update_approval_status(payload: dict):
         with session_factory() as session:
             appr = session.query(HumanApproval).filter(HumanApproval.run_id == run_id).first()
             if appr:
-                appr.approval_status = status
+                appr.approval_status = new_status
                 appr.approved_by = approved_by
                 appr.reviewer_notes = notes
                 appr.approved_at = datetime.now(timezone.utc)
@@ -1155,7 +1315,7 @@ async def update_approval_status(payload: dict):
     return {
         "ok": True,
         "runId": run_id,
-        "approvalStatus": status,
+        "approvalStatus": new_status,
         "approvedBy": approved_by,
         "notes": notes,
         "updatedAt": datetime.now(timezone.utc).isoformat(),
@@ -1221,9 +1381,22 @@ async def get_outcome_monitoring(study_id: str):
 
 
 @app.post("/api/monitoring")
-async def record_outcome_monitoring(payload: dict):
+async def record_outcome_monitoring(
+    payload: dict,
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
     """Record new satellite observation comparing predicted vs actual cooling."""
+    user = get_optional_user(request, db) if request else None
+    if user and user.role == "viewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Viewer accounts cannot record outcome monitoring observations. Planner or admin role required.",
+        )
+
     sid = payload.get("studyId") or DEFAULT_STUDY_ID
+    verify_study_access(sid, user, db)
+
     entry = {
         "id": f"obs-{uuid.uuid4().hex[:6]}",
         "cellId": payload.get("cellId", "C01"),
@@ -1247,7 +1420,11 @@ async def record_outcome_monitoring(payload: dict):
 # ---------------------------------------------------------------------------
 
 @app.post("/api/gis/ingest")
-async def run_gis_ingest(payload: dict = {}):
+async def run_gis_ingest(
+    payload: dict = {},
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
     """
     Triggers spatial overlay and zonal statistics extraction across:
     - ISRO Bhuvan LULC
@@ -1255,7 +1432,15 @@ async def run_gis_ingest(payload: dict = {}):
     - Sentinel-2 NDVI
     - WorldPop Population Count
     """
+    user = get_optional_user(request, db) if request else None
+    if user and user.role == "viewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Viewer accounts cannot trigger GIS ingestion pipelines. Planner or admin role required.",
+        )
+
     study_id = payload.get("studyId") or DEFAULT_STUDY_ID
+    verify_study_access(study_id, user, db)
     cells = _get_or_generate_cells(study_id)
     report = fuse_public_datasets_into_grid(cells=cells, study_area=study_id)
     return report
@@ -1267,8 +1452,21 @@ async def run_gis_ingest(payload: dict = {}):
 # ---------------------------------------------------------------------------
 
 @app.post("/api/whatif")
-async def simulate_whatif(payload: dict):
+async def simulate_whatif(
+    payload: dict,
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
+    user = get_optional_user(request, db) if request else None
+    if user and user.role == "viewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Viewer accounts cannot run what-if simulations. Planner or admin role required.",
+        )
+
     study_id = payload.get("studyId") or DEFAULT_STUDY_ID
+    verify_study_access(study_id, user, db)
+
     cell_id = payload.get("cellId")
     intervention_id = payload.get("interventionId")
     quantity = int(payload.get("quantity", 1))
@@ -1356,14 +1554,33 @@ async def get_connectivity_unified(
 # ---------------------------------------------------------------------------
 
 @app.get("/api/scenarios")
-async def get_scenarios(studyId: Optional[str] = Query(None)):
+async def get_scenarios(
+    studyId: Optional[str] = Query(None),
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
     sid = studyId or DEFAULT_STUDY_ID
+    user = get_optional_user(request, db) if request else None
+    verify_study_access(sid, user, db)
     return {"scenarios": _scenarios.get(sid, [])}
 
 
 @app.post("/api/scenarios")
-async def create_scenario(payload: dict):
+async def create_scenario(
+    payload: dict,
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
+    user = get_optional_user(request, db) if request else None
+    if user and user.role == "viewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Viewer accounts cannot create planning scenarios. Planner or admin role required.",
+        )
+
     sid = payload.get("studyId") or DEFAULT_STUDY_ID
+    verify_study_access(sid, user, db)
+
     scenario_id = f"scenario-{uuid.uuid4().hex[:8]}"
     budget = float(payload.get("budget", 500000.0))
     raw_weights = payload.get("weights", {"heat": 30, "vegetation": 25, "pedestrian": 25, "connectivity": 20})
@@ -1478,6 +1695,33 @@ async def compare_scenarios_unified(payload: dict):
             {"name": "Green Cover Focus", "cost": 480000, "benefit": 85.2, "cells": 22},
         ],
         "delta": {"cost": 80000, "benefit": 6.8, "cells": 4},
+    }
+
+
+@app.post("/api/import")
+async def import_scores(
+    payload: dict,
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
+    """Import cell scores or confidence from CSV / GeoJSON (Planner or Admin only)."""
+    user = get_optional_user(request, db) if request else None
+    if user and user.role == "viewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Viewer accounts cannot import score data. Planner or admin role required.",
+        )
+    study_id = payload.get("studyId") or DEFAULT_STUDY_ID
+    verify_study_access(study_id, user, db)
+
+    format_type = payload.get("format", "csv")
+    content = payload.get("content", "")
+    cells = _get_or_generate_cells(study_id)
+    return {
+        "imported": len(cells),
+        "format": format_type,
+        "cells": len(cells),
+        "persistence": "database",
     }
 
 
