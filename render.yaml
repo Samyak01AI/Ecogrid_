@@ -9,9 +9,7 @@ services:
     healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: ecogrid-db
-          property: connectionString
+        value: postgresql://ecogrid_db_81qb_user:Je87mvwShQS9Q7v5jiu0fFMxL5MOSqeu@dpg-dbcfrj6i0phs73a8pst0-a/ecogrid_db_81qb
       - key: SECRET_KEY
         generateValue: true
       - key: PUBLIC_HTTPS
@@ -20,9 +18,3 @@ services:
         value: "*"
       - key: PYTHON_VERSION
         value: 3.12.0
-
-databases:
-  - name: ecogrid-db
-    databaseName: ecogrid
-    user: ecogrid
-    plan: free
