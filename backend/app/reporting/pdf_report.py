@@ -78,6 +78,7 @@ def generate_climate_report_pdf(
     plan: Any,
     connectivity: Any,
     budget: float = 500000.0,
+    ai_briefing: Optional[dict[str, Any]] = None,
 ) -> bytes:
     """
     Generate an executive-ready climate intervention brief in PDF format.
@@ -174,6 +175,65 @@ def generate_climate_report_pdf(
         fontSize=7.5,
         leading=10,
         textColor=MUTED_TEXT,
+        alignment=1,
+    )
+    exec_box_style = ParagraphStyle(
+        "ExecBoxStyle",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8.5,
+        leading=12,
+        textColor=DARK_TEXT,
+    )
+    tradeoff_dim_style = ParagraphStyle(
+        "TradeoffDim",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        leading=10.5,
+        textColor=PRIMARY_TEAL,
+    )
+    tradeoff_desc_style = ParagraphStyle(
+        "TradeoffDesc",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=7.8,
+        leading=10.5,
+        textColor=DARK_TEXT,
+    )
+    rec_title_style = ParagraphStyle(
+        "RecTitle",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=8,
+        leading=10.5,
+        textColor=DARK_TEXT,
+    )
+    badge_high = ParagraphStyle(
+        "BadgeHigh",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=7,
+        leading=8,
+        textColor=colors.HexColor("#DC2626"),
+        alignment=1,
+    )
+    badge_med = ParagraphStyle(
+        "BadgeMed",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=7,
+        leading=8,
+        textColor=colors.HexColor("#D97706"),
+        alignment=1,
+    )
+    badge_low = ParagraphStyle(
+        "BadgeLow",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=7,
+        leading=8,
+        textColor=PRIMARY_TEAL,
         alignment=1,
     )
 
@@ -304,9 +364,120 @@ def generate_climate_report_pdf(
                 footer_style,
             )
         )
-    story.append(Spacer(1, 12))
+    # 4. AI Decision Briefing & Strategic Trade-Offs (if provided)
+    if ai_briefing and isinstance(ai_briefing, dict):
+        exec_sum = ai_briefing.get("executiveSummary", "")
+        trade_offs = ai_briefing.get("tradeOffs", [])
+        recommendations = ai_briefing.get("recommendations", [])
 
-    # 4. Connectivity & Corridors
+        story.append(Paragraph("AI Executive Decision Briefing & Strategic Trade-Offs", section_heading))
+
+        # Executive Summary Callout Box
+        if exec_sum:
+            clean_exec_sum = exec_sum.replace("**", "<b>").replace("</b><b>", "")
+            if clean_exec_sum.count("<b>") > clean_exec_sum.count("</b>"):
+                clean_exec_sum += "</b>"
+            exec_card = [
+                [
+                    Paragraph(
+                        f"<b>EXECUTIVE SYNTHESIS:</b> {clean_exec_sum}",
+                        exec_box_style,
+                    )
+                ]
+            ]
+            exec_table = Table(exec_card, colWidths=[doc.width])
+            exec_table.setStyle(
+                TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#ECFDF5")),
+                    ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#A7F3D0")),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 8),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ])
+            )
+            story.append(exec_table)
+            story.append(Spacer(1, 8))
+
+        # Strategic Trade-Offs Table
+        if trade_offs:
+            story.append(Paragraph("Strategic Trade-Off Analysis", ParagraphStyle(
+                "SubSectionHeading", parent=section_heading, fontSize=9.5, leading=12, spaceBefore=4, spaceAfter=4,
+            )))
+            to_rows = [
+                [
+                    Paragraph("<b>STRATEGIC DIMENSION</b>", kpi_label_style),
+                    Paragraph("<b>OPTIMIZER OBSERVATION & IMPLICATION</b>", kpi_label_style),
+                ]
+            ]
+            for t in trade_offs[:3]:
+                dim = str(t.get("dimension", ""))
+                obs = str(t.get("observation", ""))
+                imp = str(t.get("implication", ""))
+                desc_text = f"<b>Observation:</b> {obs}<br/><br/><b>Implication:</b> {imp}"
+                to_rows.append([
+                    Paragraph(dim, tradeoff_dim_style),
+                    Paragraph(desc_text, tradeoff_desc_style),
+                ])
+            to_table = Table(to_rows, colWidths=[140, doc.width - 140], repeatRows=1)
+            to_table.setStyle(
+                TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E6F4EA")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), PRIMARY_DARK),
+                    ("GRID", (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FAFAFA")]),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ])
+            )
+            story.append(to_table)
+            story.append(Spacer(1, 8))
+
+        # Prioritized Next Steps Table
+        if recommendations:
+            story.append(Paragraph("Prioritized Implementation Recommendations & Next Steps", ParagraphStyle(
+                "SubSectionHeading2", parent=section_heading, fontSize=9.5, leading=12, spaceBefore=4, spaceAfter=4,
+            )))
+            rec_rows = [
+                [
+                    Paragraph("<b>PRIORITY</b>", kpi_label_style),
+                    Paragraph("<b>ACTION ITEM</b>", kpi_label_style),
+                    Paragraph("<b>TIMELINE</b>", kpi_label_style),
+                    Paragraph("<b>OPERATIONAL SCOPE</b>", kpi_label_style),
+                ]
+            ]
+            for r in recommendations[:4]:
+                pri = str(r.get("priority", "MEDIUM")).upper()
+                pri_style = badge_high if pri == "HIGH" else badge_low if pri == "LOW" else badge_med
+                title = str(r.get("title", ""))
+                tl = str(r.get("timeline", "Phase 1"))
+                desc = str(r.get("description", ""))
+                rec_rows.append([
+                    Paragraph(f"<b>[{pri}]</b>", pri_style),
+                    Paragraph(title, rec_title_style),
+                    Paragraph(tl, body_style),
+                    Paragraph(desc, tradeoff_desc_style),
+                ])
+            rec_table = Table(rec_rows, colWidths=[50, 130, 60, doc.width - 240], repeatRows=1)
+            rec_table.setStyle(
+                TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E6F4EA")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), PRIMARY_DARK),
+                    ("GRID", (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FAFAFA")]),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ("ALIGN", (0, 1), (0, -1), "CENTER"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ])
+            )
+            story.append(rec_table)
+            story.append(Spacer(1, 10))
+
+    # 5. Connectivity & Corridors
     story.append(Paragraph("Ecological Connectivity & Corridor Analysis", section_heading))
     conn_text = (
         f"Graph percolation analysis indicates ecological fragmentation reduction from <b>{before_comp}</b> isolated components down to <b>{after_comp}</b> post-intervention. "

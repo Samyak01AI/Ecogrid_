@@ -237,8 +237,37 @@ export type AIScenarioExplainResponse = {
   };
 };
 
+export type KeyMetricItem = {
+  label: string;
+  value: string | number;
+  unit?: string;
+  subtext?: string;
+};
+
+export type TradeOffItem = {
+  dimension: string;
+  observation: string;
+  implication: string;
+};
+
+export type RecommendationItem = {
+  priority: 'HIGH' | 'MEDIUM' | 'LOW' | string;
+  title: string;
+  description: string;
+  timeline?: string;
+};
+
+export type StructuredBriefing = {
+  executiveSummary: string;
+  keyMetrics: KeyMetricItem[];
+  tradeOffs: TradeOffItem[];
+  recommendations: RecommendationItem[];
+  limitations: string[];
+};
+
 export type AIImpactSummaryResponse = {
   summary_markdown: string;
+  structured_briefing?: StructuredBriefing;
   study_name: string;
   metrics: {
     total_cost: number;

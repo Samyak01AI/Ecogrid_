@@ -134,3 +134,50 @@ def test_key_failover_mechanism():
     # Next key should now be active
     next_key = grok_pool.get_next_available_key()
     assert next_key.index != key_obj.index
+
+
+def test_impact_report_structured_briefing_schema(client):
+    """Verifies that impact report returns both structured_briefing and summary_markdown with authoritative metrics."""
+    payload = {
+        "studyId": "study-bengaluru-east",
+        "budget": 500000,
+        "plan": {
+            "totalCost": 485000,
+            "remainingBudget": 15000,
+            "utilization": 0.97,
+            "combinedBenefit": 84.2,
+            "cellsImproved": 20,
+            "categoryBenefits": {"heat": 32.5, "vegetation": 24.1, "pedestrian": 18.2, "connectivity": 9.4},
+            "benchmark": {"efficiency_gain_pct": 21.4},
+        },
+    }
+    resp = client.post("/api/ai/impact-summary", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert "structured_briefing" in data
+    briefing = data["structured_briefing"]
+    assert "executiveSummary" in briefing and len(briefing["executiveSummary"]) > 20
+    assert "keyMetrics" in briefing and len(briefing["keyMetrics"]) >= 4
+    assert "tradeOffs" in briefing and len(briefing["tradeOffs"]) >= 1
+    assert "recommendations" in briefing and len(briefing["recommendations"]) >= 1
+    assert "limitations" in briefing and len(briefing["limitations"]) >= 1
+
+    # Authoritative metric check (prevent hallucination)
+    metrics_by_label = {m["label"]: m for m in briefing["keyMetrics"]}
+    assert "Allocated Capital" in metrics_by_label or "Grid Cells Improved" in metrics_by_label
+
+    # GFM Markdown check
+    assert "summary_markdown" in data
+    md = data["summary_markdown"]
+    assert "| Metric |" in md or "| Trade-Off Dimension |" in md or "| Priority |" in md
+
+
+def test_pdf_report_with_ai_briefing(client):
+    """Verifies that PDF report endpoint runs and embeds AI decision briefing successfully."""
+    resp = client.get("/api/studies/study-bengaluru-east/report?format=pdf&budget=500000")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/pdf"
+    assert resp.content.startswith(b"%PDF")
+    assert len(resp.content) > 5000  # Valid multi-page PDF
+

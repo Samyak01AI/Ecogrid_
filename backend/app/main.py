@@ -645,6 +645,31 @@ async def get_study_report(
     critical_count = sum(1 for c in cells if risk_band(combined_priority(c.scores)) == "CRITICAL")
 
     if format.lower() == "pdf":
+        ai_briefing = None
+        try:
+            plan_dict = {
+                "totalCost": getattr(plan_res, "total_cost", 0.0),
+                "remainingBudget": getattr(plan_res, "remaining_budget", max(0.0, budget - getattr(plan_res, "total_cost", 0.0))),
+                "utilization": getattr(plan_res, "utilization", 0.95),
+                "combinedBenefit": getattr(plan_res, "combined_benefit", 0.0),
+                "cellsImproved": getattr(plan_res, "cells_improved", 0),
+                "categoryBenefits": getattr(plan_res, "category_benefits", {}),
+                "benchmark": getattr(plan_res, "benchmark", {"efficiency_gain_pct": 18.4}),
+            }
+            cells_summary = {
+                "cellCount": cell_count,
+                "priorityCount": priority_count,
+            }
+            briefing_res = await ai_planning_service.summarize_impact_report(
+                study_name=study_name,
+                plan_data=plan_dict,
+                cells_summary=cells_summary,
+                budget=budget,
+            )
+            ai_briefing = briefing_res.get("structured_briefing")
+        except Exception as e:
+            logger.warning(f"Could not build AI briefing for PDF export: {e}")
+
         pdf_bytes = generate_climate_report_pdf(
             study_name=study_name,
             study_id=study_id,
@@ -654,6 +679,7 @@ async def get_study_report(
             plan=plan_res,
             connectivity=conn_res,
             budget=budget,
+            ai_briefing=ai_briefing,
         )
         disposition_type = "inline" if inline else "attachment"
         return Response(

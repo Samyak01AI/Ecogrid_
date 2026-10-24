@@ -26,7 +26,7 @@
     "balanced_accuracy": 0.9494,
     "brier_score": 0.0453,
     "spatial_cv_macro_f1": "0.9397 \u00b1 0.0068",
-    "train_time_ms": 275.43
+    "train_time_ms": 190.29
   },
   "spatial_validation": "3-Fold GroupKFold Spatial Cross-Validation + Independent Spatial Block Holdout",
   "hard_constraint_enforcement": "CRITICAL: A high predicted suitability score must never override a mandatory safety or legal restriction. Safety filters (underground utilities, vehicular sightlines, structural envelopes) strictly override ML."

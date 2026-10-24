@@ -172,10 +172,12 @@ class GrokMultiKeyPool:
         messages: list[dict[str, str]],
         temperature: float = 0.3,
         max_tokens: int = 1200,
+        response_format: Optional[dict[str, str]] = None,
     ) -> dict[str, Any]:
         """
         Executes a chat completion with automatic multi-key failover and switching.
         Cycles through keys on 429 (Rate Limit), 401/403 (Invalid Key), or 5xx errors.
+        Supports structured JSON mode via response_format={"type": "json_object"}.
         """
         if not self.keys:
             self._init_pool()
@@ -217,12 +219,14 @@ class GrokMultiKeyPool:
 
             model_succeeded = False
             for try_model in candidate_models:
-                payload = {
+                payload: dict[str, Any] = {
                     "model": try_model,
                     "messages": messages,
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                 }
+                if response_format:
+                    payload["response_format"] = response_format
 
                 try:
                     async with httpx.AsyncClient(timeout=15.0) as client:
