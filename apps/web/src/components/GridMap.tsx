@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   MapContainer,
   Marker,
@@ -12,6 +12,7 @@ import {
 } from 'react-leaflet';
 import L from 'leaflet';
 import {
+  DEFAULT_STUDY,
   INTERVENTIONS,
   combinedPriority,
   layerScore,
@@ -21,8 +22,25 @@ import {
   type InterventionId,
   type LayerKey,
   type OptimizerResult,
+  type ScoreWeights,
 } from '@ecogrid/domain';
 import { Activity, Crosshair, Expand, Layers3, Map as MapIcon, Minus, Plus, Satellite, Shrink, Target } from 'lucide-react';
+import { StoreContext } from '../store-context.js';
+import { FullscreenWorkspaceTopBar } from './FullscreenWorkspace/FullscreenWorkspaceTopBar.js';
+import {
+  FullscreenPlanningToolbar,
+  type FullscreenPanelKey,
+} from './FullscreenWorkspace/FullscreenPlanningToolbar.js';
+import {
+  FullscreenPlanningPanelContainer,
+  FullscreenKPIView,
+  FullscreenInterventionsView,
+  FullscreenBudgetView,
+  FullscreenOptimizeView,
+  FullscreenCellInspectorView,
+  FullscreenLayersView,
+} from './FullscreenWorkspace/FullscreenPlanningPanels.js';
+import './FullscreenWorkspace/fullscreenWorkspace.css';
 
 type BaseMap = 'light' | 'satellite' | 'dark';
 type Props = {
@@ -76,7 +94,6 @@ function cellColor(cell: Cell, layer: LayerKey, deltaView: boolean, deltaBenefit
   const score = layerScore(cell, layer);
   return RISK_COLORS[riskBand(score)];
 }
-function displayScore(cell: Cell, layer: LayerKey): number { return Math.round(layerScore(cell, layer) * 100); }
 
 function ResizeAndFit({ bounds }: { bounds: L.LatLngBoundsExpression }): null {
   const map = useMap();
@@ -112,6 +129,25 @@ function ResizeAndFit({ bounds }: { bounds: L.LatLngBoundsExpression }): null {
       window.removeEventListener('ecogrid-reset-map', handleReset);
     };
   }, [bounds, boundsKey, map]);
+  return null;
+}
+
+function MapLayoutInvalidator({
+  isFullscreen,
+  activePanel,
+}: {
+  isFullscreen: boolean;
+  activePanel: FullscreenPanelKey | null;
+}): null {
+  const map = useMap();
+  useEffect(() => {
+    const t1 = window.setTimeout(() => map.invalidateSize({ pan: false }), 80);
+    const t2 = window.setTimeout(() => map.invalidateSize({ pan: false }), 280);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [map, isFullscreen, activePanel]);
   return null;
 }
 
@@ -229,7 +265,6 @@ function CellPolygon({ cell, selected, layer, opacity, outlines, planActive, del
     shape?.getElement()?.setAttribute('data-cell-id', cell.id);
     if (selected) shape?.bringToFront();
   }, [cell.id, selected]);
-  const risk = riskBand(combinedPriority(cell.scores));
   const neutralPlan = !deltaView && layer === 'recommended' && !planActive;
   const fill = neutralPlan ? '#183932' : cellColor(cell, layer, deltaView, deltaBenefit);
   const style = useMemo<L.PathOptions>(() => ({
@@ -251,37 +286,33 @@ function CellPolygon({ cell, selected, layer, opacity, outlines, planActive, del
       positions={positions}
       pathOptions={style}
       eventHandlers={{
-        click: (event) => onSelect(cell.id, event.originalEvent.shiftKey),
-        mouseover: (event) => { (event.target as L.Polygon).setStyle({ weight: selected ? 3 : 1.6, fillOpacity: Math.min(0.9, opacity + 0.12) }); },
-        mouseout: (event) => { (event.target as L.Polygon).setStyle(style); },
+        click: (event) => {
+          L.DomEvent.stopPropagation(event);
+          onSelect(cell.id, Boolean((event.originalEvent as MouseEvent).shiftKey));
+        },
       }}
-    >
-      <Tooltip sticky direction="top" opacity={0.96} className="eco-map-tooltip">
-        <span className="tooltip-cell-id">{cell.id}</span><span>{cell.areaName}</span>
-        <strong>{deltaView ? `${deltaBenefit >= 0 ? '+' : ''}${deltaBenefit.toFixed(3)}` : displayScore(cell, layer)} <small>{deltaView ? 'weighted benefit · B−A' : `/ 100 · ${risk}`}</small></strong>
-      </Tooltip>
-    </Polygon>
+    />
   );
 }
 
-function BoxSelect({ cells, onSelectCells }: { cells: readonly Cell[]; onSelectCells: (ids: string[]) => void }): null {
+function BoxSelect({ cells, onSelectCells }: { cells: readonly Cell[]; onSelectCells: (cellIds: string[]) => void }): null {
   const map = useMap();
-  const active = useRef<{ origin: L.LatLng; originPoint: L.Point; rectangle: L.Rectangle } | null>(null);
+  const active = useRef<{ origin: L.LatLng; rectangle: L.Rectangle } | null>(null);
   const moved = useRef(false);
   useMapEvents({
     mousedown(event) {
-      if (!event.originalEvent.shiftKey || event.originalEvent.button !== 0) return;
-      event.originalEvent.preventDefault();
-      const originPoint = map.latLngToContainerPoint(event.latlng);
-      active.current = { origin: event.latlng, originPoint, rectangle: L.rectangle(L.latLngBounds(event.latlng, event.latlng), { color: '#8be2a8', weight: 1.5, dashArray: '5 4', fillColor: '#4CC38A', fillOpacity: 0.09, interactive: false }).addTo(map) };
-      moved.current = false;
+      if (!event.originalEvent.shiftKey) return;
       map.dragging.disable();
+      moved.current = false;
+      const origin = event.latlng;
+      const rectangle = L.rectangle(L.latLngBounds(origin, origin), { color: '#B7F7D0', weight: 1.5, fillOpacity: 0.18, dashArray: '4 4' }).addTo(map);
+      active.current = { origin, rectangle };
     },
     mousemove(event) {
-      if (!active.current) return;
-      const currentPoint = map.latLngToContainerPoint(event.latlng);
-      if (currentPoint.distanceTo(active.current.originPoint) > 6) moved.current = true;
-      active.current.rectangle.setBounds(L.latLngBounds(active.current.origin, event.latlng));
+      const selection = active.current;
+      if (!selection) return;
+      moved.current = true;
+      selection.rectangle.setBounds(L.latLngBounds(selection.origin, event.latlng));
     },
     mouseup(event) {
       const selection = active.current;
@@ -306,30 +337,199 @@ function BoxSelect({ cells, onSelectCells }: { cells: readonly Cell[]; onSelectC
   return null;
 }
 
-export default function GridMap({ cells, selectedCell, selectedCells, onSelectCell, onSelectCells, layer, onLayerChange, plan, connectivity, opacity, showOutlines, onOpacityChange, onOutlineToggle, originPicker, scenarioComparison, compact = false, syncGroup }: Props) {
+export default function GridMap({
+  cells,
+  selectedCell,
+  selectedCells,
+  onSelectCell,
+  onSelectCells,
+  layer,
+  onLayerChange,
+  plan,
+  connectivity,
+  opacity,
+  showOutlines,
+  onOpacityChange,
+  onOutlineToggle,
+  originPicker,
+  scenarioComparison,
+  compact = false,
+  syncGroup,
+}: Props) {
+  const store = useContext(StoreContext);
+  const shellRef = useRef<HTMLElement | null>(null);
+
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [activePanel, setActivePanel] = useState<FullscreenPanelKey | null>(null);
+
   const [baseMap, setBaseMap] = useState<BaseMap>(() => {
-    try { const fromUrl = new URLSearchParams(location.search).get('basemap'); const saved = localStorage.getItem('ecogrid-basemap'); const value = fromUrl ?? saved; return value === 'satellite' || value === 'dark' ? value : 'light'; } catch { return 'light'; }
+    try {
+      const fromUrl = new URLSearchParams(location.search).get('basemap');
+      const saved = localStorage.getItem('ecogrid-basemap');
+      const value = fromUrl ?? saved;
+      return value === 'satellite' || value === 'dark' ? value : 'light';
+    } catch {
+      return 'light';
+    }
   });
   const [showLayerMenu, setShowLayerMenu] = useState(false);
   const [deltaView, setDeltaView] = useState(false);
   const [coordinate, setCoordinate] = useState('12.94080, 77.63120');
   const [miniMapOpen, setMiniMapOpen] = useState(false);
   const [markerFiltersOpen, setMarkerFiltersOpen] = useState(false);
-  const [visibleMarkerTypes, setVisibleMarkerTypes] = useState<Set<InterventionId>>(() => new Set(INTERVENTIONS.map((item) => item.id)));
+  const [visibleMarkerTypes, setVisibleMarkerTypes] = useState<Set<InterventionId>>(
+    () => new Set(INTERVENTIONS.map((item) => item.id))
+  );
   const [locateError, setLocateError] = useState(false);
-  const mapBounds = useMemo(() => L.latLngBounds(cells.flatMap((cell) => cell.polygon.map(([latitude, longitude]) => L.latLng(latitude, longitude)))), [cells]);
+
+  // Sync state with store if available
+  const effectivePlan = plan ?? store?.plan ?? null;
+  const effectiveBudget = store?.budget ?? 500000;
+  const effectiveWeights = store?.weights ?? { heat: 30, vegetation: 25, pedestrian: 25, connectivity: 20 };
+  const effectiveStudyId = store?.activeStudyId ?? DEFAULT_STUDY.id;
+  const activeStudy = store?.studies.find((s) => s.id === effectiveStudyId) ?? store?.studies[0] ?? {
+    ...DEFAULT_STUDY,
+    cellCount: cells.length,
+  };
+
+  const selectedCellObj = useMemo(() => {
+    return selectedCell ? cells.find((c) => c.id === selectedCell) ?? null : null;
+  }, [cells, selectedCell]);
+
+  const isRealData = useMemo(() => {
+    return (
+      cells.length > 0 &&
+      cells.some((c) => {
+        const meta = c as unknown as { dataStatus?: string; dataSource?: string; dataLabel?: string };
+        return (
+          meta.dataStatus === 'validated' ||
+          meta.dataSource === 'satellite' ||
+          String(meta.dataLabel ?? '').includes('MEASURED') ||
+          String(meta.dataLabel ?? '').includes('REAL')
+        );
+      })
+    );
+  }, [cells]);
+
+  const avgPriorityScore = useMemo(() => {
+    if (!cells.length) return 50;
+    const sum = cells.reduce((acc, c) => acc + combinedPriority(c.scores), 0);
+    return Math.round((sum / cells.length) * 100);
+  }, [cells]);
+
+  const isBudgetOutdated = useMemo(() => {
+    if (!effectivePlan) return false;
+    const p = effectivePlan as unknown as { budget?: number };
+    return p.budget !== undefined && p.budget !== effectiveBudget;
+  }, [effectivePlan, effectiveBudget]);
+
+  // Fullscreen management
+  const enterFullscreen = useCallback(async () => {
+    try {
+      const el = shellRef.current;
+      if (el && !document.fullscreenElement && el.requestFullscreen) {
+        await el.requestFullscreen();
+      }
+    } catch {
+      // Fallback to CSS expanded layout
+    }
+    setIsFullscreen(true);
+  }, []);
+
+  const exitFullscreen = useCallback(async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      }
+    } catch {
+      // ignore
+    }
+    setIsFullscreen(false);
+    setActivePanel(null);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    if (isFullscreen) void exitFullscreen();
+    else void enterFullscreen();
+  }, [isFullscreen, enterFullscreen, exitFullscreen]);
+
+  // Sync fullscreenchange event
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      const isDocFull = Boolean(
+        document.fullscreenElement &&
+          shellRef.current &&
+          (document.fullscreenElement === shellRef.current || shellRef.current.contains(document.fullscreenElement))
+      );
+      if (!document.fullscreenElement) {
+        setIsFullscreen(false);
+        setActivePanel(null);
+      } else if (isDocFull) {
+        setIsFullscreen(true);
+      }
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
+
+  // Keyboard Escape management: Escape closes active panel first without exiting fullscreen
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (activePanel !== null) {
+          e.preventDefault();
+          e.stopPropagation();
+          setActivePanel(null);
+        } else {
+          void exitFullscreen();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [isFullscreen, activePanel, exitFullscreen]);
+
+  const centerMap = useCallback((lat: number, lng: number) => {
+    window.dispatchEvent(
+      new CustomEvent('ecogrid-center-map', {
+        detail: { lat, lng, zoom: 17 },
+      })
+    );
+  }, []);
+
+  const handleSetBudget = useCallback((b: number) => {
+    if (store?.setBudget) store.setBudget(b);
+  }, [store]);
+
+  const handleSetWeights = useCallback((w: ScoreWeights) => {
+    if (store?.setWeights) store.setWeights(w);
+  }, [store]);
+
+  const handleSetPlan = useCallback((p: OptimizerResult) => {
+    if (store?.setPlan) store.setPlan(p);
+  }, [store]);
+
+  const mapBounds = useMemo(
+    () => L.latLngBounds(cells.flatMap((cell) => cell.polygon.map(([latitude, longitude]) => L.latLng(latitude, longitude)))),
+    [cells]
+  );
   const boundsArray = useMemo(() => mapBounds.toBBoxString(), [mapBounds]);
   const activeLayer = BASEMAPS[baseMap];
   const cellsById = useMemo(() => new Map(cells.map((cell) => [cell.id, cell] as const)), [cells]);
+
   const planByCell = useMemo(() => {
     const map = new Map<string, string[]>();
-    for (const candidate of plan?.selected ?? []) map.set(candidate.cellId, [...(map.get(candidate.cellId) ?? []), candidate.interventionName]);
+    for (const candidate of effectivePlan?.selected ?? []) {
+      map.set(candidate.cellId, [...(map.get(candidate.cellId) ?? []), candidate.interventionName]);
+    }
     return map;
-  }, [plan]);
+  }, [effectivePlan]);
+
   const planMarkers = useMemo(() => {
     const grouped = new Map<string, OptimizerResult['selected'][number][]>();
     if (deltaView) return [];
-    for (const candidate of plan?.selected ?? []) {
+    for (const candidate of effectivePlan?.selected ?? []) {
       if (!visibleMarkerTypes.has(candidate.interventionId)) continue;
       grouped.set(candidate.cellId, [...(grouped.get(candidate.cellId) ?? []), candidate]);
     }
@@ -342,8 +542,10 @@ export default function GridMap({ cells, selectedCell, selectedCells, onSelectCe
         if (!intervention) continue;
         const angle = (index / candidates.length) * Math.PI * 2 - Math.PI / 2;
         const offsetMeters = candidates.length > 1 ? 12 : 0;
-        const latitude = cell.center[0] + Math.cos(angle) * offsetMeters / 111_320;
-        const longitude = cell.center[1] + Math.sin(angle) * offsetMeters / (111_320 * Math.max(0.15, Math.cos(cell.center[0] * Math.PI / 180)));
+        const latitude = cell.center[0] + (Math.cos(angle) * offsetMeters) / 111_320;
+        const longitude =
+          cell.center[1] +
+          (Math.sin(angle) * offsetMeters) / (111_320 * Math.max(0.15, Math.cos((cell.center[0] * Math.PI) / 180)));
         const icon = L.divIcon({
           className: 'ecogrid-intervention-marker',
           html: `<span class="intervention-marker-glyph" data-intervention-id="${candidate.interventionId}" style="--marker-color:${intervention.markerColor};--marker-delay:${Math.min(index, 8) * 40}ms" aria-hidden="true">${MARKER_GLYPHS[candidate.interventionId]}</span>`,
@@ -354,49 +556,85 @@ export default function GridMap({ cells, selectedCell, selectedCells, onSelectCe
       }
     }
     return markers;
-  }, [cellsById, deltaView, plan, visibleMarkerTypes]);
+  }, [cellsById, deltaView, effectivePlan, visibleMarkerTypes]);
+
   const deltaByCell = useMemo(() => {
     const delta = new Map<string, number>();
-    for (const candidate of scenarioComparison?.baseline.selected ?? []) delta.set(candidate.cellId, (delta.get(candidate.cellId) ?? 0) - candidate.combinedBenefit);
-    for (const candidate of scenarioComparison?.proposal.selected ?? []) delta.set(candidate.cellId, (delta.get(candidate.cellId) ?? 0) + candidate.combinedBenefit);
+    for (const candidate of scenarioComparison?.baseline.selected ?? []) {
+      delta.set(candidate.cellId, (delta.get(candidate.cellId) ?? 0) - candidate.combinedBenefit);
+    }
+    for (const candidate of scenarioComparison?.proposal.selected ?? []) {
+      delta.set(candidate.cellId, (delta.get(candidate.cellId) ?? 0) + candidate.combinedBenefit);
+    }
     return delta;
   }, [scenarioComparison]);
-  const componentColors = useMemo(() => new Map(connectivity?.components.flatMap((component) => component.cellIds.map((cellId) => [cellId, component.color] as const)) ?? []), [connectivity]);
+
+  const componentColors = useMemo(
+    () => new Map(connectivity?.components.flatMap((component) => component.cellIds.map((cellId) => [cellId, component.color] as const)) ?? []),
+    [connectivity]
+  );
   const planLinks = useMemo(() => connectivity?.links ?? [], [connectivity]);
+
   const resetMap = useCallback(() => {
     const mapElement = document.querySelector('.grid-map-container');
     if (mapElement) mapElement.dispatchEvent(new CustomEvent('ecogrid-reset-map'));
   }, []);
+
   const locate = useCallback(() => {
     setLocateError(false);
-    if (!navigator.geolocation) { setLocateError(true); return; }
-    navigator.geolocation.getCurrentPosition((position) => {
-      const target = document.querySelector('.grid-map-container');
-      target?.dispatchEvent(new CustomEvent('ecogrid-center-map', { detail: { lat: position.coords.latitude, lng: position.coords.longitude } }));
-    }, () => setLocateError(true), { enableHighAccuracy: true, timeout: 8000 });
+    if (!navigator.geolocation) {
+      setLocateError(true);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const target = document.querySelector('.grid-map-container');
+        target?.dispatchEvent(
+          new CustomEvent('ecogrid-center-map', {
+            detail: { lat: position.coords.latitude, lng: position.coords.longitude },
+          })
+        );
+      },
+      () => setLocateError(true),
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
   }, []);
+
   const toggleMarkerType = useCallback((id: InterventionId) => {
     setVisibleMarkerTypes((current) => {
       const next = new Set(current);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }, []);
+
   const toggleMarkerFilters = useCallback(() => {
     setMarkerFiltersOpen((open) => !open);
     setMiniMapOpen(false);
   }, []);
-  const selectedLayerLabel = deltaView ? 'Scenario delta' : LAYERS.find((item) => item.key === layer)?.label ?? 'Combined priority';
 
-  useEffect(() => { if (!scenarioComparison) setDeltaView(false); }, [scenarioComparison]);
+  const selectedLayerLabel = deltaView
+    ? 'Scenario delta'
+    : LAYERS.find((item) => item.key === layer)?.label ?? 'Combined priority';
 
   useEffect(() => {
-    try { localStorage.setItem('ecogrid-basemap', baseMap); } catch { /* Storage can be disabled by the browser. */ }
+    if (!scenarioComparison) setDeltaView(false);
+  }, [scenarioComparison]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ecogrid-basemap', baseMap);
+    } catch {
+      /* Storage can be disabled by the browser. */
+    }
     const params = new URLSearchParams(window.location.search);
-    if (baseMap === 'light') params.delete('basemap'); else params.set('basemap', baseMap);
+    if (baseMap === 'light') params.delete('basemap');
+    else params.set('basemap', baseMap);
     const query = params.toString();
     window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
   }, [baseMap]);
+
   useEffect(() => {
     const container = document.querySelector('.grid-map-container');
     if (!container) return;
@@ -408,69 +646,441 @@ export default function GridMap({ cells, selectedCell, selectedCells, onSelectCe
     return () => container.removeEventListener('ecogrid-center-map', onCenter);
   }, []);
 
-  return <section className="map-shell" aria-label="Interactive climate analysis grid">
-    {!compact && <div className="map-top-controls">
-      <div className="map-layer-control">
-        <button className={`map-tool-button ${showLayerMenu ? 'is-active' : ''}`} type="button" aria-label="Choose map layer" aria-expanded={showLayerMenu} onClick={() => setShowLayerMenu((value) => !value)}><Layers3 size={16} /><span>{deltaView ? 'Delta' : LAYERS.find((item) => item.key === layer)?.short ?? 'Layer'}</span></button>
-        {showLayerMenu && <div className="layer-popover" role="menu" aria-label="Map layers">{LAYERS.map((item) => <button key={item.key} type="button" role="menuitemradio" aria-checked={!deltaView && layer === item.key} onClick={() => { setDeltaView(false); onLayerChange(item.key); setShowLayerMenu(false); }}><span className={`layer-swatch swatch-${item.key}`} />{item.label}{!deltaView && layer === item.key && <span className="layer-check">✓</span>}</button>)}{scenarioComparison && <button type="button" role="menuitemradio" aria-checked={deltaView} onClick={() => { setDeltaView(true); setShowLayerMenu(false); }}><span className="layer-swatch swatch-scenario-delta" />Scenario delta{deltaView && <span className="layer-check">✓</span>}</button>}</div>}
+  return (
+    <section
+      ref={shellRef}
+      className={`map-shell ${isFullscreen ? 'is-fullscreen fullscreen-workspace' : ''}`}
+      aria-label="Interactive climate analysis grid"
+    >
+      {/* Fullscreen Workspace Topbar */}
+      {isFullscreen && !compact && (
+        <FullscreenWorkspaceTopBar
+          studyName={activeStudy?.name ?? 'Study Area'}
+          gridRows={activeStudy?.rows ?? 10}
+          gridCols={activeStudy?.columns ?? 10}
+          cellCount={cells.length}
+          origin={activeStudy?.origin ?? [12.9352, 77.6245]}
+          coordinate={coordinate}
+          layer={layer}
+          baseMap={baseMap}
+          onBaseMapToggle={() => setBaseMap((value) => (value === 'light' ? 'satellite' : value === 'satellite' ? 'dark' : 'light'))}
+          showOutlines={showOutlines}
+          onOutlineToggle={onOutlineToggle}
+          onResetView={resetMap}
+          onLocate={locate}
+          onExitFullscreen={() => void exitFullscreen()}
+          isRealData={isRealData}
+        />
+      )}
+
+      {/* Non-fullscreen standard controls */}
+      {!compact && !isFullscreen && (
+        <div className="map-top-controls">
+          <div className="map-layer-control">
+            <button
+              className={`map-tool-button ${showLayerMenu ? 'is-active' : ''}`}
+              type="button"
+              aria-label="Choose map layer"
+              aria-expanded={showLayerMenu}
+              onClick={() => setShowLayerMenu((value) => !value)}
+            >
+              <Layers3 size={16} />
+              <span>{deltaView ? 'Delta' : LAYERS.find((item) => item.key === layer)?.short ?? 'Layer'}</span>
+            </button>
+            {showLayerMenu && (
+              <div className="layer-popover" role="menu" aria-label="Map layers">
+                {LAYERS.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={!deltaView && layer === item.key}
+                    onClick={() => {
+                      setDeltaView(false);
+                      onLayerChange(item.key);
+                      setShowLayerMenu(false);
+                    }}
+                  >
+                    <span className={`layer-swatch swatch-${item.key}`} />
+                    {item.label}
+                    {!deltaView && layer === item.key && <span className="layer-check">✓</span>}
+                  </button>
+                ))}
+                {scenarioComparison && (
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={deltaView}
+                    onClick={() => {
+                      setDeltaView(true);
+                      setShowLayerMenu(false);
+                    }}
+                  >
+                    <span className="layer-swatch swatch-scenario-delta" />
+                    Scenario delta
+                    {deltaView && <span className="layer-check">✓</span>}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <button
+            className="map-tool-button basemap-select"
+            type="button"
+            aria-label={`Basemap: ${BASEMAPS[baseMap].label}`}
+            onClick={() => setBaseMap((value) => (value === 'light' ? 'satellite' : value === 'satellite' ? 'dark' : 'light'))}
+          >
+            {baseMap === 'satellite' ? <Satellite size={16} /> : <MapIcon size={16} />}
+            <span>{BASEMAPS[baseMap].label}</span>
+          </button>
+          <button
+            className={`map-tool-button outline-toggle ${showOutlines ? 'is-active' : ''}`}
+            type="button"
+            aria-pressed={showOutlines}
+            onClick={onOutlineToggle}
+          >
+            <span className="outline-icon" />
+            Outlines
+          </button>
+          {layer === 'connectivity' && (
+            <span className="map-status-tag">
+              <Activity size={13} />
+              Network view
+            </span>
+          )}
+        </div>
+      )}
+
+      {!isFullscreen && (
+        <MarkerFilterControl
+          compact={compact}
+          activeTypes={visibleMarkerTypes}
+          count={planMarkers.length}
+          total={deltaView ? 0 : effectivePlan?.selected.length ?? 0}
+          open={markerFiltersOpen}
+          onToggleOpen={toggleMarkerFilters}
+          onToggleType={toggleMarkerType}
+        />
+      )}
+
+      <div className="map-canvas">
+        <MapContainer
+          key={boundsArray}
+          bounds={mapBounds}
+          boundsOptions={{ padding: [18, 18], maxZoom: 17 }}
+          scrollWheelZoom
+          zoomControl={false}
+          preferCanvas={cells.length > 500}
+          className={`grid-map-container basemap-${baseMap}`}
+          aria-label="Urban climate intervention grid map"
+        >
+          <TileLayer key={baseMap} url={activeLayer.url} attribution={activeLayer.attribution} maxZoom={19} />
+          {!compact && <DynamicScaleControl />}
+          {!compact && miniMapOpen && <GeographicMiniMap baseMap={baseMap} />}
+          <Pane name="gridCells" style={{ zIndex: 410 }}>
+            {cells.map((cell) => (
+              <CellPolygon
+                key={cell.id}
+                cell={cell}
+                selected={selectedCells.includes(cell.id) || selectedCell === cell.id}
+                layer={layer}
+                opacity={
+                  !deltaView && layer === 'recommended' && planByCell.has(cell.id)
+                    ? Math.max(opacity, 0.68)
+                    : opacity
+                }
+                outlines={showOutlines}
+                planActive={planByCell.has(cell.id)}
+                deltaView={deltaView}
+                deltaBenefit={deltaByCell.get(cell.id) ?? 0}
+                onSelect={onSelectCell}
+              />
+            ))}
+          </Pane>
+          <Pane name="connectivityLines" style={{ zIndex: 430 }}>
+            {layer === 'connectivity' &&
+              planLinks.map((link) => {
+                const from = cells.find((cell) => cell.id === link.from);
+                const to = cells.find((cell) => cell.id === link.to);
+                if (!from || !to) return null;
+                return (
+                  <Polyline
+                    key={`${link.from}-${link.to}-${link.kind}`}
+                    positions={[
+                      [from.center[0], from.center[1]],
+                      [to.center[0], to.center[1]],
+                    ]}
+                    pathOptions={{
+                      color: link.kind === 'new' ? '#B7F7D0' : componentColors.get(link.from) ?? '#4CC38A',
+                      weight: link.kind === 'new' ? 3 : 2,
+                      dashArray: link.kind === 'new' ? '6 6' : undefined,
+                      opacity: 0.92,
+                      interactive: false,
+                    }}
+                  />
+                );
+              })}
+          </Pane>
+          <Pane name="interventionMarkers" style={{ zIndex: 440 }}>
+            {planMarkers.map(({ candidate, cell, position, icon }) => (
+              <Marker
+                key={`${candidate.cellId}-${candidate.interventionId}`}
+                position={position}
+                icon={icon}
+                title={`${candidate.interventionName} at ${cell.id}`}
+                riseOnHover
+                eventHandlers={{ click: () => onSelectCell(cell.id, false) }}
+              >
+                <Tooltip>
+                  {candidate.interventionName} · {cell.id} · {candidate.quantity} {candidate.unit}
+                </Tooltip>
+              </Marker>
+            ))}
+          </Pane>
+          {originPicker && (
+            <Pane name="studyOriginMarker" style={{ zIndex: 650, pointerEvents: 'auto' }}>
+              <Marker
+                position={[originPicker.position[0], originPicker.position[1]]}
+                draggable
+                title="Drag to adjust the study-area origin"
+                icon={originMarkerIcon}
+                eventHandlers={{
+                  dragend: (event) => {
+                    const point = (event.target as L.Marker).getLatLng();
+                    originPicker.onChange(point.lat, point.lng);
+                  },
+                }}
+              />
+            </Pane>
+          )}
+          <ResizeAndFit bounds={mapBounds} />
+          <MapLayoutInvalidator isFullscreen={isFullscreen} activePanel={activePanel} />
+          {syncGroup && <MapSyncBridge group={syncGroup} />}
+          <BoxSelect cells={cells} onSelectCells={onSelectCells} />
+          <MapMapEvents bounds={mapBounds} onCoordinate={setCoordinate} />
+          {!compact && (
+            <div className="map-utility-controls-float">
+              <MapActionButtons
+                onCoordinate={setCoordinate}
+                onLocate={locate}
+                onReset={resetMap}
+                onToggleFullscreen={toggleFullscreen}
+                isFullscreen={isFullscreen}
+              />
+            </div>
+          )}
+        </MapContainer>
+
+        {!isFullscreen && (
+          <div className="map-float-title">
+            <span className="live-dot" />
+            LIVE ANALYSIS <span className="map-title-separator">/</span> {selectedLayerLabel.toUpperCase()}
+          </div>
+        )}
+
+        <div className={`map-legend ${isFullscreen ? 'fullscreen-map-legend' : ''}`} aria-label={`${selectedLayerLabel} legend`}>
+          <div className="legend-heading">
+            {deltaView
+              ? 'PROPOSAL − BASELINE'
+              : layer === 'recommended'
+              ? 'PLAN / CELL'
+              : `${selectedLayerLabel} / 0–100`}
+          </div>
+          {deltaView ? (
+            <div className="delta-legend">
+              <span>
+                <i className="delta-positive" />
+                Proposal improves
+              </span>
+              <span>
+                <i className="delta-neutral" />
+                No difference
+              </span>
+              <span>
+                <i className="delta-negative" />
+                Baseline improves
+              </span>
+            </div>
+          ) : layer === 'recommended' ? (
+            <>
+              <span>
+                <i className="legend-plan" />
+                Recommended intervention
+              </span>
+              <span>
+                <i className="legend-neutral" />
+                No action allocated
+              </span>
+            </>
+          ) : (
+            <div className="legend-ramp">
+              <div>
+                <i style={{ backgroundColor: RISK_COLORS.CRITICAL }} />
+                <label>Critical</label>
+              </div>
+              <div>
+                <i style={{ backgroundColor: RISK_COLORS.HIGH }} />
+                <label>High</label>
+              </div>
+              <div>
+                <i style={{ backgroundColor: RISK_COLORS.MODERATE }} />
+                <label>Moderate</label>
+              </div>
+              <div>
+                <i style={{ backgroundColor: RISK_COLORS.LOW }} />
+                <label>Low</label>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {!compact && !isFullscreen && (
+          <div className="map-coordinates">
+            <span className="coordinate-cross">⌖</span> {coordinate} <span className="coordinate-separator">·</span> {cells.length} CELLS
+          </div>
+        )}
+
+        {!compact && !isFullscreen && (
+          <button
+            className={`map-minimap-trigger ${miniMapOpen ? 'is-active' : ''}`}
+            type="button"
+            aria-label="Toggle mini-map"
+            aria-pressed={miniMapOpen}
+            onClick={() => {
+              setMiniMapOpen((value) => !value);
+              setMarkerFiltersOpen(false);
+            }}
+          >
+            <Layers3 size={15} />
+          </button>
+        )}
+
+        {locateError && <div className="map-message" role="status">Location unavailable. Check browser permission.</div>}
+
+        {!compact && !isFullscreen && (
+          <div className="map-opacity-control">
+            <label htmlFor="grid-opacity">
+              GRID OPACITY <b>{Math.round(opacity * 100)}%</b>
+            </label>
+            <input
+              id="grid-opacity"
+              aria-label="Grid opacity"
+              type="range"
+              min="0.2"
+              max="0.82"
+              step="0.02"
+              value={opacity}
+              onChange={(event) => onOpacityChange(Number(event.currentTarget.value))}
+            />
+          </div>
+        )}
+
+        <div className="map-attribution-note" dangerouslySetInnerHTML={{ __html: activeLayer.attribution }} />
+
+        {/* FULLSCREEN CONTEXTUAL DRAWER */}
+        {isFullscreen && !compact && activePanel !== null && (
+          <FullscreenPlanningPanelContainer
+            activePanel={activePanel}
+            onClose={() => setActivePanel(null)}
+          >
+            {activePanel === 'kpi' && (
+              <FullscreenKPIView
+                cells={cells}
+                selectedCell={selectedCellObj}
+                plan={effectivePlan}
+                budget={effectiveBudget}
+                connectivity={connectivity}
+                onSelectCell={(id) => onSelectCell(id, false)}
+                onOpenOptimize={() => setActivePanel('optimize')}
+              />
+            )}
+            {activePanel === 'interventions' && (
+              <FullscreenInterventionsView
+                cells={cells}
+                plan={effectivePlan}
+                selectedCellId={selectedCell}
+                onSelectCell={(id) => onSelectCell(id, false)}
+                onCenterMap={(lat, lng) => centerMap(lat, lng)}
+                onOpenOptimize={() => setActivePanel('optimize')}
+              />
+            )}
+            {activePanel === 'budget' && (
+              <FullscreenBudgetView
+                budget={effectiveBudget}
+                setBudget={handleSetBudget}
+                plan={effectivePlan}
+                onOpenOptimize={() => setActivePanel('optimize')}
+              />
+            )}
+            {activePanel === 'optimize' && (
+              <FullscreenOptimizeView
+                studyId={effectiveStudyId}
+                studyName={activeStudy?.name ?? 'Campus Study'}
+                cells={cells}
+                budget={effectiveBudget}
+                weights={effectiveWeights}
+                setWeights={handleSetWeights}
+                plan={effectivePlan}
+                setPlan={handleSetPlan}
+                setLayer={onLayerChange}
+                pushToast={store?.pushToast}
+              />
+            )}
+            {activePanel === 'inspector' && (
+              <FullscreenCellInspectorView
+                selectedCellId={selectedCell}
+                cells={cells}
+                studyId={effectiveStudyId}
+                plan={effectivePlan}
+                budget={effectiveBudget}
+                onSelectCell={(id) => onSelectCell(id, false)}
+              />
+            )}
+            {activePanel === 'layers' && (
+              <FullscreenLayersView
+                layer={layer}
+                onLayerChange={onLayerChange}
+                baseMap={baseMap}
+                setBaseMap={setBaseMap}
+                showOutlines={showOutlines}
+                onOutlineToggle={onOutlineToggle}
+                opacity={opacity}
+                onOpacityChange={onOpacityChange}
+                visibleMarkerTypes={visibleMarkerTypes}
+                onToggleMarkerType={toggleMarkerType}
+              />
+            )}
+          </FullscreenPlanningPanelContainer>
+        )}
+
+        {/* FULLSCREEN PLANNING TOOLBAR */}
+        {isFullscreen && !compact && (
+          <FullscreenPlanningToolbar
+            activePanel={activePanel}
+            onTogglePanel={(key) => setActivePanel((prev) => (prev === key ? null : key))}
+            planCount={effectivePlan?.selected.length ?? 0}
+            budget={effectiveBudget}
+            avgPriority={avgPriorityScore}
+            selectedCellId={selectedCell}
+            activeLayer={layer}
+            budgetOutdated={isBudgetOutdated}
+            onClosePanel={() => setActivePanel(null)}
+          />
+        )}
       </div>
-      <button className="map-tool-button basemap-select" type="button" aria-label={`Basemap: ${BASEMAPS[baseMap].label}`} onClick={() => setBaseMap((value) => value === 'light' ? 'satellite' : value === 'satellite' ? 'dark' : 'light')}>
-        {baseMap === 'satellite' ? <Satellite size={16} /> : <MapIcon size={16} />}<span>{BASEMAPS[baseMap].label}</span>
-      </button>
-      <button className={`map-tool-button outline-toggle ${showOutlines ? 'is-active' : ''}`} type="button" aria-pressed={showOutlines} onClick={onOutlineToggle}><span className="outline-icon" />Outlines</button>
-      {layer === 'connectivity' && <span className="map-status-tag"><Activity size={13} />Network view</span>}
-    </div>}
-    <MarkerFilterControl compact={compact} activeTypes={visibleMarkerTypes} count={planMarkers.length} total={deltaView ? 0 : plan?.selected.length ?? 0} open={markerFiltersOpen} onToggleOpen={toggleMarkerFilters} onToggleType={toggleMarkerType} />
-    <div className="map-canvas">
-      <MapContainer
-        key={boundsArray}
-        bounds={mapBounds}
-        boundsOptions={{ padding: [18, 18], maxZoom: 17 }}
-        scrollWheelZoom
-        zoomControl={false}
-        preferCanvas={cells.length > 500}
-        className={`grid-map-container basemap-${baseMap}`}
-        aria-label="Urban climate intervention grid map"
-      >
-        <TileLayer key={baseMap} url={activeLayer.url} attribution={activeLayer.attribution} maxZoom={19} />
-        {!compact && <DynamicScaleControl />}
-        {!compact && miniMapOpen && <GeographicMiniMap baseMap={baseMap} />}
-        <Pane name="gridCells" style={{ zIndex: 410 }}>
-          {cells.map((cell) => <CellPolygon key={cell.id} cell={cell} selected={selectedCells.includes(cell.id) || selectedCell === cell.id} layer={layer} opacity={!deltaView && layer === 'recommended' && planByCell.has(cell.id) ? Math.max(opacity, 0.68) : opacity} outlines={showOutlines} planActive={planByCell.has(cell.id)} deltaView={deltaView} deltaBenefit={deltaByCell.get(cell.id) ?? 0} onSelect={onSelectCell} />)}
-        </Pane>
-        <Pane name="connectivityLines" style={{ zIndex: 430 }}>
-          {layer === 'connectivity' && planLinks.map((link) => {
-            const from = cells.find((cell) => cell.id === link.from);
-            const to = cells.find((cell) => cell.id === link.to);
-            if (!from || !to) return null;
-            return <Polyline key={`${link.from}-${link.to}-${link.kind}`} positions={[[from.center[0], from.center[1]], [to.center[0], to.center[1]]]} pathOptions={{ color: link.kind === 'new' ? '#B7F7D0' : componentColors.get(link.from) ?? '#4CC38A', weight: link.kind === 'new' ? 3 : 2, dashArray: link.kind === 'new' ? '6 6' : undefined, opacity: 0.92, interactive: false }} />;
-          })}
-        </Pane>
-        <Pane name="interventionMarkers" style={{ zIndex: 440 }}>
-          {planMarkers.map(({ candidate, cell, position, icon }) => <Marker key={`${candidate.cellId}-${candidate.interventionId}`} position={position} icon={icon} title={`${candidate.interventionName} at ${cell.id}`} riseOnHover eventHandlers={{ click: () => onSelectCell(cell.id, false) }}>
-            <Tooltip>{candidate.interventionName} · {cell.id} · {candidate.quantity} {candidate.unit}</Tooltip>
-          </Marker>)}
-        </Pane>
-        {originPicker && <Pane name="studyOriginMarker" style={{ zIndex: 650, pointerEvents: 'auto' }}><Marker position={[originPicker.position[0], originPicker.position[1]]} draggable title="Drag to adjust the study-area origin" icon={originMarkerIcon} eventHandlers={{ dragend: (event) => { const point = (event.target as L.Marker).getLatLng(); originPicker.onChange(point.lat, point.lng); } }} /></Pane>}
-        <ResizeAndFit bounds={mapBounds} />
-        {syncGroup && <MapSyncBridge group={syncGroup} />}
-        <BoxSelect cells={cells} onSelectCells={onSelectCells} />
-        <MapMapEvents bounds={mapBounds} onCoordinate={setCoordinate} />
-        {!compact && <div className="map-utility-controls-float"><MapActionButtons onCoordinate={setCoordinate} onLocate={locate} onReset={resetMap} /></div>}
-      </MapContainer>
-      <div className="map-float-title"><span className="live-dot" />LIVE ANALYSIS <span className="map-title-separator">/</span> {selectedLayerLabel.toUpperCase()}</div>
-      <div className="map-legend" aria-label={`${selectedLayerLabel} legend`}>
-        <div className="legend-heading">{deltaView ? 'PROPOSAL − BASELINE' : layer === 'recommended' ? 'PLAN / CELL' : `${selectedLayerLabel} / 0–100`}</div>
-        {deltaView ? <div className="delta-legend"><span><i className="delta-positive" />Proposal improves</span><span><i className="delta-neutral" />No difference</span><span><i className="delta-negative" />Baseline improves</span></div> : layer === 'recommended' ? <><span><i className="legend-plan" />Recommended intervention</span><span><i className="legend-neutral" />No action allocated</span></> : <div className="legend-ramp"><div><i style={{ backgroundColor: RISK_COLORS.CRITICAL }} /><label>Critical</label></div><div><i style={{ backgroundColor: RISK_COLORS.HIGH }} /><label>High</label></div><div><i style={{ backgroundColor: RISK_COLORS.MODERATE }} /><label>Moderate</label></div><div><i style={{ backgroundColor: RISK_COLORS.LOW }} /><label>Low</label></div></div>}
-      </div>
-      {!compact && <div className="map-coordinates"><span className="coordinate-cross">⌖</span> {coordinate} <span className="coordinate-separator">·</span> {cells.length} CELLS</div>}
-      {!compact && <button className={`map-minimap-trigger ${miniMapOpen ? 'is-active' : ''}`} type="button" aria-label="Toggle mini-map" aria-pressed={miniMapOpen} onClick={() => { setMiniMapOpen((value) => !value); setMarkerFiltersOpen(false); }}><Layers3 size={15} /></button>}
-      {locateError && <div className="map-message" role="status">Location unavailable. Check browser permission.</div>}
-      {!compact && <div className="map-opacity-control"><label htmlFor="grid-opacity">GRID OPACITY <b>{Math.round(opacity * 100)}%</b></label><input id="grid-opacity" aria-label="Grid opacity" type="range" min="0.2" max="0.82" step="0.02" value={opacity} onChange={(event) => onOpacityChange(Number(event.currentTarget.value))} /></div>}
-      <div className="map-attribution-note" dangerouslySetInnerHTML={{ __html: activeLayer.attribution }} />
-    </div>
-    {!compact && plan && <div className="map-plan-summary"><span><i className="plan-marker-dot" />{plan.cellsImproved} cells actioned</span><span>₹{plan.totalCost.toLocaleString('en-IN')} deployed</span><span>{plan.selected.length} interventions</span></div>}
-  </section>;
+
+      {!compact && !isFullscreen && effectivePlan && (
+        <div className="map-plan-summary">
+          <span>
+            <i className="plan-marker-dot" />
+            {effectivePlan.cellsImproved} cells actioned
+          </span>
+          <span>₹{effectivePlan.totalCost.toLocaleString('en-IN')} deployed</span>
+          <span>{effectivePlan.selected.length} interventions</span>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function MapMapEvents({ bounds, onCoordinate }: { bounds: L.LatLngBoundsExpression; onCoordinate: (coordinate: string) => void }): null {
@@ -478,7 +1088,10 @@ function MapMapEvents({ bounds, onCoordinate }: { bounds: L.LatLngBoundsExpressi
   useEffect(() => {
     const container = map.getContainer();
     const reset = () => map.fitBounds(bounds, { padding: [20, 20], maxZoom: 17, animate: true, duration: 0.28 });
-    const center = (event: Event) => { const detail = (event as CustomEvent<{ lat: number; lng: number }>).detail; if (detail) map.setView([detail.lat, detail.lng], Math.max(map.getZoom(), 16), { animate: true }); };
+    const center = (event: Event) => {
+      const detail = (event as CustomEvent<{ lat: number; lng: number }>).detail;
+      if (detail) map.setView([detail.lat, detail.lng], Math.max(map.getZoom(), 16), { animate: true });
+    };
     const sync = () => {
       const params = new URLSearchParams(window.location.search);
       params.set('zoom', String(map.getZoom()));
@@ -492,31 +1105,73 @@ function MapMapEvents({ bounds, onCoordinate }: { bounds: L.LatLngBoundsExpressi
     window.addEventListener('ecogrid-map-center-request', center);
     map.on('moveend', sync);
     map.whenReady(sync);
-    return () => { container.removeEventListener('ecogrid-reset-map', reset); window.removeEventListener('ecogrid-map-center-request', center); map.off('moveend', sync); };
+    return () => {
+      container.removeEventListener('ecogrid-reset-map', reset);
+      window.removeEventListener('ecogrid-map-center-request', center);
+      map.off('moveend', sync);
+    };
   }, [bounds, map, onCoordinate]);
   return null;
 }
 
-function MapActionButtons({ onLocate, onReset, onCoordinate }: { onLocate: () => void; onReset: () => void; onCoordinate: (coordinate: string) => void }) {
+function MapActionButtons({
+  onLocate,
+  onReset,
+  onCoordinate,
+  onToggleFullscreen,
+  isFullscreen,
+}: {
+  onLocate: () => void;
+  onReset: () => void;
+  onCoordinate: (coordinate: string) => void;
+  onToggleFullscreen?: () => void;
+  isFullscreen?: boolean;
+}) {
   const map = useMap();
-  const [full, setFull] = useState(false);
+  const [docFullscreen, setDocFullscreen] = useState(false);
+
   useEffect(() => {
-    const sync = () => setFull(Boolean(document.fullscreenElement));
+    const sync = () => setDocFullscreen(Boolean(document.fullscreenElement));
     document.addEventListener('fullscreenchange', sync);
     return () => document.removeEventListener('fullscreenchange', sync);
   }, []);
-  const fullToggle = async () => {
-    const wrapper = map.getContainer().parentElement;
+
+  const isFull = isFullscreen ?? docFullscreen;
+
+  const handleToggle = async () => {
+    if (onToggleFullscreen) {
+      onToggleFullscreen();
+      return;
+    }
+    const wrapper = map.getContainer().closest('.map-shell') ?? map.getContainer().parentElement;
     if (document.fullscreenElement) await document.exitFullscreen();
     else await wrapper?.requestFullscreen?.();
   };
-  return <div className="map-utility-controls" aria-label="Map controls">
-    <MapSignals onCoordinate={onCoordinate} />
-    <button type="button" title="Zoom in" aria-label="Zoom in" onClick={() => map.zoomIn()}><Plus size={16} /></button>
-    <button type="button" title="Zoom out" aria-label="Zoom out" onClick={() => map.zoomOut()}><Minus size={16} /></button>
-    <span className="control-divider" />
-    <button type="button" title="Reset map view" aria-label="Reset map view" onClick={onReset}><Target size={16} /></button>
-    <button type="button" title="Locate my position" aria-label="Locate my position" onClick={onLocate}><Crosshair size={16} /></button>
-    <button type="button" title={full ? 'Exit fullscreen' : 'Fullscreen'} aria-label={full ? 'Exit fullscreen' : 'Fullscreen'} onClick={() => void fullToggle()}>{full ? <Shrink size={16} /> : <Expand size={16} />}</button>
-  </div>;
+
+  return (
+    <div className="map-utility-controls" aria-label="Map controls">
+      <MapSignals onCoordinate={onCoordinate} />
+      <button type="button" title="Zoom in" aria-label="Zoom in" onClick={() => map.zoomIn()}>
+        <Plus size={16} />
+      </button>
+      <button type="button" title="Zoom out" aria-label="Zoom out" onClick={() => map.zoomOut()}>
+        <Minus size={16} />
+      </button>
+      <span className="control-divider" />
+      <button type="button" title="Reset map view" aria-label="Reset map view" onClick={onReset}>
+        <Target size={16} />
+      </button>
+      <button type="button" title="Locate my position" aria-label="Locate my position" onClick={onLocate}>
+        <Crosshair size={16} />
+      </button>
+      <button
+        type="button"
+        title={isFull ? 'Exit fullscreen planning workspace' : 'Expand to Fullscreen Planning Workspace'}
+        aria-label={isFull ? 'Exit fullscreen planning workspace' : 'Expand to Fullscreen Planning Workspace'}
+        onClick={() => void handleToggle()}
+      >
+        {isFull ? <Shrink size={16} /> : <Expand size={16} />}
+      </button>
+    </div>
+  );
 }
