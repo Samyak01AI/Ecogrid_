@@ -234,7 +234,7 @@ describe('Fullscreen Planning Workspace Domain & Component Logic', () => {
       const mode: MapInteractionMode = 'inspect';
 
       const handleCellClick = (cellId: string) => {
-        if (mode === 'inspect') {
+        if (mode === 'inspect' && cellId) {
           activePanel = 'inspector';
         }
       };

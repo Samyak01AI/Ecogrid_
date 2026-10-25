@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import React from 'react';
 import { normalizeOptimizerResult, type AdaptiveComparisonResult } from '../../api.js';
 import { FullscreenErrorBoundary, sanitizeErrorMessage } from './FullscreenErrorBoundary.js';
-import { formatComparisonBriefing } from './FullscreenPlanningPanels.js';
+import { formatComparisonBriefing } from './adaptiveComparisonBriefing.js';
 import type { OptimizerResult } from '@ecogrid/domain';
 
 describe('Adaptive Optimization Recovery & Error Protection', () => {
@@ -196,7 +195,7 @@ describe('Adaptive Optimization Recovery & Error Protection', () => {
       const runFailedOptimization = async () => {
         try {
           throw new Error('OR-Tools CP-SAT infeasible: statutory tree restrictions violated in all priority cells.');
-        } catch (err) {
+        } catch {
           // Non-destructive: DO NOT touch currentPlan
           errorMessage = 'Adaptive optimization could not be completed. Your existing plan is unchanged. Review the error or retry.';
         }

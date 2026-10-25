@@ -11,7 +11,6 @@ import {
   validateInterventionCandidate,
   groupInterventionsForMap,
   layoutInterventionsForMap,
-  type Cell,
   type Candidate,
   type OptimizerResult,
   type LatLng,

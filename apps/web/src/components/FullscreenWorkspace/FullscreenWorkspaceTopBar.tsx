@@ -4,7 +4,6 @@ import {
   Crosshair,
   Globe2,
   Layers,
-  Map as MapIcon,
   Satellite,
   Scan,
   ShieldCheck,
@@ -88,7 +87,10 @@ export function FullscreenWorkspaceTopBar({
         <div className="fullscreen-study-info">
           <Globe2 size={13} className="fullscreen-globe-icon" />
           <span className="fullscreen-study-name">{studyName.toUpperCase()}</span>
-          <span className="fullscreen-study-matrix">
+          <span
+            className="fullscreen-study-matrix"
+            title={`Origin: ${coordinate || `${latStr}, ${lngStr}`}`}
+          >
             {gridCols} × {gridRows} ({cellCount} CELLS)
           </span>
         </div>

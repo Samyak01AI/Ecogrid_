@@ -6,7 +6,9 @@ table wrapping, and ecological corridor metrics.
 """
 from __future__ import annotations
 
+import html
 import io
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -24,6 +26,84 @@ from reportlab.platypus import (
     TableStyle,
 )
 from reportlab.pdfgen import canvas
+
+
+def sanitize_reportlab_text(text: str) -> str:
+    """
+    Safely convert plain text or markdown to valid ReportLab XML.
+    - Handles markdown bold **bold** -> <b>bold</b>
+    - Handles markdown italic *italic* -> <i>italic</i>
+    - Escapes special XML characters (&, <, >) to avoid parser errors
+    - Ensures all tags are properly balanced and closed
+    """
+    if not text:
+        return ""
+    text = str(text)
+
+    # Normalize newlines
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    # Replace markdown bold **...** with temporary unique tokens
+    text = re.sub(r"\*\*(.+?)\*\*", r"__RL_BOLD_OPEN__\1__RL_BOLD_CLOSE__", text, flags=re.DOTALL)
+    text = text.replace("**", "")  # Strip any leftover unpaired markdown asterisks
+
+    # Replace markdown italic *...* with temporary tokens
+    text = re.sub(r"(?<!\*)\*([^*]+?)\*(?!\*)", r"__RL_ITALIC_OPEN__\1__RL_ITALIC_CLOSE__", text)
+
+    # Escape XML special entities (&, <, >)
+    # Only escape & if not part of an existing XML entity like &amp;, &lt;, &gt;, &#123;
+    text = re.sub(r"&(?!([a-zA-Z]+|#\d+|#x[0-9a-fA-F]+);)", "&amp;", text)
+    text = text.replace("<", "&lt;").replace(">", "&gt;")
+
+    # Restore converted tokens to valid ReportLab tags
+    text = text.replace("__RL_BOLD_OPEN__", "<b>").replace("__RL_BOLD_CLOSE__", "</b>")
+    text = text.replace("__RL_ITALIC_OPEN__", "<i>").replace("__RL_ITALIC_CLOSE__", "</i>")
+
+    # Clean up any empty tags
+    text = text.replace("<b></b>", "").replace("<i></i>", "")
+
+    # Ensure tags are strictly balanced
+    b_diff = text.count("<b>") - text.count("</b>")
+    if b_diff > 0:
+        text += "</b>" * b_diff
+    elif b_diff < 0:
+        text = ("<b>" * abs(b_diff)) + text
+
+    i_diff = text.count("<i>") - text.count("</i>")
+    if i_diff > 0:
+        text += "</i>" * i_diff
+    elif i_diff < 0:
+        text = ("<i>" * abs(i_diff)) + text
+
+    return text
+
+
+def create_safe_paragraph(
+    text: str,
+    style: ParagraphStyle,
+    prefix_html: str = "",
+) -> Paragraph:
+    """
+    Constructs a ReportLab Paragraph guaranteed never to throw an unhandled XML parsing exception.
+    If parsing fails for any reason, strips all markup and falls back to escaped plain text.
+    """
+    sanitized = sanitize_reportlab_text(text)
+    full_html = f"{prefix_html} {sanitized}".strip() if prefix_html else sanitized
+    try:
+        return Paragraph(full_html, style)
+    except Exception:
+        # Fail-safe fallback: strip all tags and escape
+        clean_plain = re.sub(r"<[^>]+>", "", text or "")
+        safe_escaped = html.escape(clean_plain)
+        if prefix_html:
+            clean_prefix = re.sub(r"<[^>]+>", "", prefix_html)
+            fallback_text = f"<b>{html.escape(clean_prefix)}</b> {safe_escaped}".strip()
+        else:
+            fallback_text = safe_escaped
+        try:
+            return Paragraph(fallback_text, style)
+        except Exception:
+            return Paragraph("Content could not be rendered", style)
 
 
 class NumberedCanvas(canvas.Canvas):
@@ -246,9 +326,11 @@ def generate_climate_report_pdf(
     story.append(Spacer(1, 3))
 
     generated_date = datetime.now(timezone.utc).strftime("%d %B %Y %H:%M UTC")
+    safe_study_name = html.escape(str(study_name))
+    safe_study_id = html.escape(str(study_id))
     story.append(
         Paragraph(
-            f"Study Area: <b>{study_name}</b> ({study_id}) · Generated: {generated_date} · Multi-Objective CP-SAT Solver",
+            f"Study Area: <b>{safe_study_name}</b> ({safe_study_id}) · Generated: {generated_date} · Multi-Objective CP-SAT Solver",
             subtitle_style,
         )
     )
@@ -330,10 +412,10 @@ def generate_climate_report_pdf(
         suitability = getattr(c, "suitability_score", 0.0) if hasattr(c, "suitability_score") else c.get("suitability_score", 0.0)
 
         candidate_rows.append([
-            Paragraph(f"<b>{cell_id}</b>", body_style),
-            Paragraph(area_name, body_style),
-            Paragraph(int_name, body_style),
-            Paragraph(f"{qty:.0f} {unit}", body_style),
+            Paragraph(f"<b>{html.escape(str(cell_id))}</b>", body_style),
+            Paragraph(html.escape(str(area_name)), body_style),
+            Paragraph(html.escape(str(int_name)), body_style),
+            Paragraph(f"{qty:.0f} {html.escape(str(unit))}", body_style),
             Paragraph(f"{cost:,.0f}", body_style),
             Paragraph(f"{suitability:.1f}%", body_style),
         ])
@@ -374,14 +456,12 @@ def generate_climate_report_pdf(
 
         # Executive Summary Callout Box
         if exec_sum:
-            clean_exec_sum = exec_sum.replace("**", "<b>").replace("</b><b>", "")
-            if clean_exec_sum.count("<b>") > clean_exec_sum.count("</b>"):
-                clean_exec_sum += "</b>"
             exec_card = [
                 [
-                    Paragraph(
-                        f"<b>EXECUTIVE SYNTHESIS:</b> {clean_exec_sum}",
+                    create_safe_paragraph(
+                        exec_sum,
                         exec_box_style,
+                        prefix_html="<b>EXECUTIVE SYNTHESIS:</b>",
                     )
                 ]
             ]
@@ -412,12 +492,12 @@ def generate_climate_report_pdf(
             ]
             for t in trade_offs[:3]:
                 dim = str(t.get("dimension", ""))
-                obs = str(t.get("observation", ""))
-                imp = str(t.get("implication", ""))
+                obs = sanitize_reportlab_text(str(t.get("observation", "")))
+                imp = sanitize_reportlab_text(str(t.get("implication", "")))
                 desc_text = f"<b>Observation:</b> {obs}<br/><br/><b>Implication:</b> {imp}"
                 to_rows.append([
-                    Paragraph(dim, tradeoff_dim_style),
-                    Paragraph(desc_text, tradeoff_desc_style),
+                    create_safe_paragraph(dim, tradeoff_dim_style),
+                    create_safe_paragraph(desc_text, tradeoff_desc_style),
                 ])
             to_table = Table(to_rows, colWidths=[140, doc.width - 140], repeatRows=1)
             to_table.setStyle(
@@ -456,9 +536,9 @@ def generate_climate_report_pdf(
                 desc = str(r.get("description", ""))
                 rec_rows.append([
                     Paragraph(f"<b>[{pri}]</b>", pri_style),
-                    Paragraph(title, rec_title_style),
-                    Paragraph(tl, body_style),
-                    Paragraph(desc, tradeoff_desc_style),
+                    create_safe_paragraph(title, rec_title_style),
+                    create_safe_paragraph(tl, body_style),
+                    create_safe_paragraph(desc, tradeoff_desc_style),
                 ])
             rec_table = Table(rec_rows, colWidths=[50, 130, 60, doc.width - 240], repeatRows=1)
             rec_table.setStyle(
