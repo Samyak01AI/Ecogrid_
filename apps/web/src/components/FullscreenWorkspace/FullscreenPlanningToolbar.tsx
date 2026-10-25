@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Activity,
+  ChevronLeft,
+  ChevronRight,
   HandCoins,
   Layers3,
   Scan,
@@ -41,6 +43,8 @@ export function FullscreenPlanningToolbar({
   budgetOutdated = false,
   onClosePanel,
 }: Props) {
+  const [isExpanded, setIsExpanded] = useState<boolean>(true);
+
   const tools: Array<{
     key: FullscreenPanelKey;
     label: string;
@@ -60,11 +64,11 @@ export function FullscreenPlanningToolbar({
     },
     {
       key: 'interventions',
-      label: 'Interventions',
+      label: 'Plan',
       icon: Sprout,
       badge: `${planCount}`,
       badgeTone: planCount > 0 ? 'mint' : 'default',
-      tooltip: 'Recommended Interventions & Allocation List',
+      tooltip: 'Recommended Actions & Allocation List',
     },
     {
       key: 'budget',
@@ -79,18 +83,18 @@ export function FullscreenPlanningToolbar({
       key: 'optimize',
       label: 'Optimize',
       icon: WandSparkles,
-      badge: 'OR-Tools',
+      badge: 'CP-SAT',
       badgeTone: 'blue',
-      tooltip: 'Run OR-Tools CP-SAT Optimization Solver',
+      tooltip: 'Run OR-Tools CP-SAT & Grok Adaptive Solver',
       hasNotification: budgetOutdated,
     },
     {
       key: 'inspector',
       label: 'Cell Inspector',
       icon: Scan,
-      badge: selectedCellId ? selectedCellId : 'Select cell',
+      badge: selectedCellId ? selectedCellId : 'None',
       badgeTone: selectedCellId ? 'mint' : 'default',
-      tooltip: 'Selected Cell Microclimate & What-If Modeling',
+      tooltip: 'Selected Cell Microclimate & Diagnostics',
     },
     {
       key: 'layers',
@@ -103,8 +107,28 @@ export function FullscreenPlanningToolbar({
   ];
 
   return (
-    <nav className="fullscreen-planning-toolbar-dock" aria-label="Fullscreen planning tools">
-      <div className="fullscreen-toolbar-container">
+    <nav
+      className={`fullscreen-vertical-tool-rail ${isExpanded ? 'is-expanded' : 'is-collapsed'}`}
+      aria-label="Planning tools rail"
+      role="toolbar"
+      aria-orientation="vertical"
+    >
+      <div className="tool-rail-header">
+        <span className="tool-rail-title" id="tool-rail-label">
+          {isExpanded ? 'PLANNING TOOLS' : 'TOOLS'}
+        </span>
+        <button
+          type="button"
+          className="tool-rail-collapse-btn"
+          title={isExpanded ? 'Collapse tool rail' : 'Expand tool rail'}
+          aria-label={isExpanded ? 'Collapse tool rail' : 'Expand tool rail'}
+          onClick={() => setIsExpanded((prev) => !prev)}
+        >
+          {isExpanded ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+        </button>
+      </div>
+
+      <div className="tool-rail-items" role="group" aria-labelledby="tool-rail-label">
         {tools.map((item) => {
           const Icon = item.icon;
           const isActive = activePanel === item.key;
@@ -112,40 +136,46 @@ export function FullscreenPlanningToolbar({
             <button
               key={item.key}
               type="button"
-              className={`fullscreen-toolbar-item ${isActive ? 'is-active' : ''}`}
+              className={`tool-rail-item ${isActive ? 'is-active' : ''}`}
               title={item.tooltip}
               aria-label={item.tooltip}
               aria-pressed={isActive}
               onClick={() => onTogglePanel(item.key)}
             >
-              <span className="toolbar-item-icon-wrap">
-                <Icon size={16} strokeWidth={1.8} />
-                {item.hasNotification && <span className="toolbar-notification-dot" />}
+              <span className="tool-rail-icon-wrap">
+                <Icon size={17} strokeWidth={1.8} />
+                {item.hasNotification && <span className="tool-rail-notification-dot" />}
               </span>
-              <span className="toolbar-item-content">
-                <span className="toolbar-item-label">{item.label}</span>
-                <span className={`toolbar-item-badge tone-${item.badgeTone ?? 'default'}`}>
-                  {item.badge}
-                </span>
-              </span>
-              {isActive && <span className="toolbar-active-indicator" />}
+
+              {isExpanded && (
+                <div className="tool-rail-content">
+                  <span className="tool-rail-label">{item.label}</span>
+                  <span className={`tool-rail-badge tone-${item.badgeTone ?? 'default'}`}>
+                    {item.badge}
+                  </span>
+                </div>
+              )}
+
+              {isActive && <span className="tool-rail-active-indicator" />}
             </button>
           );
         })}
+      </div>
 
-        {activePanel && onClosePanel && (
+      {activePanel && onClosePanel && (
+        <div className="tool-rail-footer">
           <button
             type="button"
-            className="fullscreen-toolbar-close-btn"
+            className="tool-rail-close-btn"
             title="Collapse active panel (Esc)"
             aria-label="Collapse active panel"
             onClick={onClosePanel}
           >
-            <X size={15} />
-            <span>Collapse</span>
+            <X size={14} />
+            {isExpanded && <span>Close Panel</span>}
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </nav>
   );
 }

@@ -16,6 +16,8 @@ All scores use consistent 0-100 normalized scale.
 """
 from __future__ import annotations
 
+from typing import Any, Optional
+
 from app.schemas.schemas import CellResponse, InterventionId, ScoreSet
 
 
@@ -51,6 +53,30 @@ def combined_priority(scores: ScoreSet, weights: dict[str, float] | None = None)
         + scores.connectivity_gap * weights.get("connectivity", 0.20)
     )
     return max(0, min(100, round(total, 1)))
+
+
+def calculate_priority(
+    indicators: ScoreSet,
+    validated_strategy: Any | None = None,
+    weights: dict[str, float] | None = None,
+) -> float:
+    """
+    Terrain-Adaptive Priority Scoring (Phase 9):
+    Calculates environmental priority using a ValidatedStrategy and FormulaRegistry.
+    Preserves default fixed-weight linear additive behavior when validated_strategy is None.
+    Deterministic, bounded [0, 100], strictly non-eval.
+    """
+    if validated_strategy is not None:
+        try:
+            from app.adaptive_ai.formula_registry import formula_registry
+            formula_id = getattr(validated_strategy, "formula_id", "weighted_additive_v1")
+            params = getattr(validated_strategy, "priority_weights", weights or {})
+            return formula_registry.evaluate(formula_id, indicators, params)
+        except Exception:
+            # Safe deterministic fallback
+            pass
+
+    return combined_priority(indicators, weights)
 
 
 def risk_band(score: float) -> str:

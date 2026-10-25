@@ -15,6 +15,7 @@ import {
   DEFAULT_STUDY,
   INTERVENTIONS,
   combinedPriority,
+  layoutInterventionsForMap,
   layerScore,
   riskBand,
   type Cell,
@@ -26,7 +27,11 @@ import {
 } from '@ecogrid/domain';
 import { Activity, Crosshair, Expand, Layers3, Map as MapIcon, Minus, Plus, Satellite, Shrink, Target } from 'lucide-react';
 import { StoreContext } from '../store-context.js';
-import { FullscreenWorkspaceTopBar } from './FullscreenWorkspace/FullscreenWorkspaceTopBar.js';
+import {
+  FullscreenWorkspaceTopBar,
+  type MapInteractionMode,
+} from './FullscreenWorkspace/FullscreenWorkspaceTopBar.js';
+import { FullscreenKPIStrip } from './FullscreenWorkspace/FullscreenKPIStrip.js';
 import {
   FullscreenPlanningToolbar,
   type FullscreenPanelKey,
@@ -40,6 +45,7 @@ import {
   FullscreenCellInspectorView,
   FullscreenLayersView,
 } from './FullscreenWorkspace/FullscreenPlanningPanels.js';
+import { FullscreenErrorBoundary } from './FullscreenWorkspace/FullscreenErrorBoundary.js';
 import './FullscreenWorkspace/fullscreenWorkspace.css';
 
 type BaseMap = 'light' | 'satellite' | 'dark';
@@ -141,11 +147,28 @@ function MapLayoutInvalidator({
 }): null {
   const map = useMap();
   useEffect(() => {
-    const t1 = window.setTimeout(() => map.invalidateSize({ pan: false }), 80);
-    const t2 = window.setTimeout(() => map.invalidateSize({ pan: false }), 280);
+    const invalidate = () => {
+      try {
+        map.invalidateSize({ pan: false, debounceMoveend: true });
+      } catch {
+        // map container might be detaching
+      }
+    };
+
+    const t1 = window.setTimeout(invalidate, 80);
+    const t2 = window.setTimeout(invalidate, 260);
+    const t3 = window.setTimeout(invalidate, 450);
+
+    const onResize = () => invalidate();
+    window.addEventListener('resize', onResize);
+    window.addEventListener('ecogrid-invalidate-map-size', onResize);
+
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
+      window.clearTimeout(t3);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('ecogrid-invalidate-map-size', onResize);
     };
   }, [map, isFullscreen, activePanel]);
   return null;
@@ -381,6 +404,8 @@ export default function GridMap({
     () => new Set(INTERVENTIONS.map((item) => item.id))
   );
   const [locateError, setLocateError] = useState(false);
+  const [interactionMode, setInteractionMode] = useState<MapInteractionMode>('explore');
+  const [isDrawerPinned, setIsDrawerPinned] = useState(false);
 
   // Sync state with store if available
   const effectivePlan = plan ?? store?.plan ?? null;
@@ -521,42 +546,82 @@ export default function GridMap({
   const planByCell = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const candidate of effectivePlan?.selected ?? []) {
+      if (candidate.studyAreaId && candidate.studyAreaId !== effectiveStudyId) continue;
+      if (!cellsById.has(candidate.cellId)) continue;
       map.set(candidate.cellId, [...(map.get(candidate.cellId) ?? []), candidate.interventionName]);
     }
     return map;
+  }, [cellsById, effectivePlan, effectiveStudyId]);
+
+  const overallModeledBenefit = useMemo(() => {
+    if (!effectivePlan?.selected) return 0;
+    return effectivePlan.selected.reduce((acc, c) => acc + (c.combinedBenefit ?? 0), 0);
   }, [effectivePlan]);
 
-  const planMarkers = useMemo(() => {
-    const grouped = new Map<string, OptimizerResult['selected'][number][]>();
-    if (deltaView) return [];
-    for (const candidate of effectivePlan?.selected ?? []) {
-      if (!visibleMarkerTypes.has(candidate.interventionId)) continue;
-      grouped.set(candidate.cellId, [...(grouped.get(candidate.cellId) ?? []), candidate]);
-    }
-    const markers: { candidate: OptimizerResult['selected'][number]; cell: Cell; position: [number, number]; icon: L.DivIcon }[] = [];
-    for (const [cellId, candidates] of grouped) {
-      const cell = cellsById.get(cellId);
-      if (!cell) continue;
-      for (const [index, candidate] of candidates.entries()) {
-        const intervention = INTERVENTION_BY_ID.get(candidate.interventionId);
-        if (!intervention) continue;
-        const angle = (index / candidates.length) * Math.PI * 2 - Math.PI / 2;
-        const offsetMeters = candidates.length > 1 ? 12 : 0;
-        const latitude = cell.center[0] + (Math.cos(angle) * offsetMeters) / 111_320;
-        const longitude =
-          cell.center[1] +
-          (Math.sin(angle) * offsetMeters) / (111_320 * Math.max(0.15, Math.cos((cell.center[0] * Math.PI) / 180)));
-        const icon = L.divIcon({
-          className: 'ecogrid-intervention-marker',
-          html: `<span class="intervention-marker-glyph" data-intervention-id="${candidate.interventionId}" style="--marker-color:${intervention.markerColor};--marker-delay:${Math.min(index, 8) * 40}ms" aria-hidden="true">${MARKER_GLYPHS[candidate.interventionId]}</span>`,
-          iconSize: [26, 26],
-          iconAnchor: [13, 13],
-        });
-        markers.push({ candidate, cell, position: [latitude, longitude], icon });
+  const handleCellClick = useCallback(
+    (cellId: string, additive: boolean) => {
+      onSelectCell(cellId, additive);
+      if (isFullscreen) {
+        if (interactionMode === 'inspect') {
+          setActivePanel('inspector');
+        } else if (interactionMode === 'plan') {
+          if (planByCell.has(cellId)) {
+            setActivePanel('interventions');
+          } else {
+            setActivePanel('inspector');
+          }
+        } else if (isDrawerPinned) {
+          if (activePanel === null) {
+            setActivePanel('inspector');
+          }
+        }
       }
+    },
+    [activePanel, interactionMode, isDrawerPinned, isFullscreen, onSelectCell, planByCell]
+  );
+
+  const planMarkers = useMemo(() => {
+    if (deltaView) return [];
+
+    const { markers, failures } = layoutInterventionsForMap({
+      plan: effectivePlan,
+      activeStudyId: effectiveStudyId,
+      activeGridVersion: '2.0',
+      cellsById,
+      visibleMarkerTypes,
+    });
+
+    if (failures.length > 0 && process.env.NODE_ENV !== 'production') {
+      console.warn(
+        `[EcoGrid GIS] Discarded ${failures.length} invalid or misaligned intervention marker(s):`,
+        failures.map((f) => f.reason)
+      );
     }
-    return markers;
-  }, [cellsById, deltaView, effectivePlan, visibleMarkerTypes]);
+
+    return markers.map(({ cellId, cell, candidate, position, indexInCell, totalInCell }) => {
+      const intervention = INTERVENTION_BY_ID.get(candidate.interventionId);
+      const markerColor = intervention?.markerColor ?? '#4cc38a';
+      const glyph = MARKER_GLYPHS[candidate.interventionId] ?? '★';
+
+      const icon = L.divIcon({
+        className: `ecogrid-intervention-marker ${selectedCell === cellId ? 'is-selected' : ''}`,
+        html: `<span class="intervention-marker-glyph" data-intervention-id="${candidate.interventionId}" style="--marker-color:${markerColor};--marker-delay:${Math.min(indexInCell, 8) * 40}ms" aria-hidden="true">${glyph}</span>`,
+        iconSize: [26, 26],
+        iconAnchor: [13, 13],
+      });
+
+      return {
+        key: `${cellId}-${candidate.interventionId}-${indexInCell}`,
+        cellId,
+        candidate,
+        cell,
+        position: [position[0], position[1]] as [number, number],
+        indexInCell,
+        totalInCell,
+        icon,
+      };
+    });
+  }, [cellsById, deltaView, effectivePlan, effectiveStudyId, selectedCell, visibleMarkerTypes]);
 
   const deltaByCell = useMemo(() => {
     const delta = new Map<string, number>();
@@ -670,6 +735,8 @@ export default function GridMap({
           onLocate={locate}
           onExitFullscreen={() => void exitFullscreen()}
           isRealData={isRealData}
+          interactionMode={interactionMode}
+          onInteractionModeChange={setInteractionMode}
         />
       )}
 
@@ -793,7 +860,7 @@ export default function GridMap({
                 planActive={planByCell.has(cell.id)}
                 deltaView={deltaView}
                 deltaBenefit={deltaByCell.get(cell.id) ?? 0}
-                onSelect={onSelectCell}
+                onSelect={handleCellClick}
               />
             ))}
           </Pane>
@@ -822,17 +889,30 @@ export default function GridMap({
               })}
           </Pane>
           <Pane name="interventionMarkers" style={{ zIndex: 440 }}>
-            {planMarkers.map(({ candidate, cell, position, icon }) => (
+            {planMarkers.map(({ key, cell, candidate, position, icon }) => (
               <Marker
-                key={`${candidate.cellId}-${candidate.interventionId}`}
+                key={key}
                 position={position}
                 icon={icon}
                 title={`${candidate.interventionName} at ${cell.id}`}
                 riseOnHover
-                eventHandlers={{ click: () => onSelectCell(cell.id, false) }}
+                eventHandlers={{
+                  click: (e) => {
+                    L.DomEvent.stopPropagation(e);
+                    handleCellClick(cell.id, false);
+                    if (isFullscreen) {
+                      setActivePanel(interactionMode === 'plan' ? 'interventions' : 'inspector');
+                    }
+                  },
+                }}
               >
-                <Tooltip>
-                  {candidate.interventionName} · {cell.id} · {candidate.quantity} {candidate.unit}
+                <Tooltip className="eco-map-tooltip" direction="top" offset={[0, -10]}>
+                  <span className="tooltip-cell-id">{cell.id}</span>
+                  <span>{candidate.interventionName}</span>
+                  <strong>
+                    {candidate.quantity} {candidate.unit}
+                    <small> · ₹{candidate.cost.toLocaleString('en-IN')}</small>
+                  </strong>
                 </Tooltip>
               </Marker>
             ))}
@@ -977,80 +1057,107 @@ export default function GridMap({
 
         <div className="map-attribution-note" dangerouslySetInnerHTML={{ __html: activeLayer.attribution }} />
 
-        {/* FULLSCREEN CONTEXTUAL DRAWER */}
+        {/* COMPACT ENVIRONMENTAL KPI STRIP (PHASE 5) */}
+        {isFullscreen && !compact && (
+          <FullscreenKPIStrip
+            totalBudget={effectiveBudget}
+            allocated={effectivePlan?.totalCost ?? 0}
+            cellsInPlan={effectivePlan?.cellsImproved ?? 0}
+            totalInterventions={effectivePlan?.selected?.length ?? 0}
+            totalCells={cells.length}
+            overallBenefit={overallModeledBenefit}
+            budgetOutdated={isBudgetOutdated}
+            activePlanMode={effectivePlan?.planMode ?? (effectivePlan ? 'standard' : null)}
+            strategyName={effectivePlan?.strategyName}
+            onOpenBudget={() => setActivePanel('budget')}
+            onOpenOptimize={() => setActivePanel('optimize')}
+            onOpenKPIs={() => setActivePanel('kpi')}
+          />
+        )}
+
+        {/* FULLSCREEN CONTEXTUAL DRAWER (PHASE 4) */}
         {isFullscreen && !compact && activePanel !== null && (
-          <FullscreenPlanningPanelContainer
-            activePanel={activePanel}
-            onClose={() => setActivePanel(null)}
+          <FullscreenErrorBoundary
+            panelName="Contextual Planning Workspace"
+            fallbackTitle="Planning Workspace Notice"
+            fallbackMessage="The current workspace drawer encountered an issue, but your map, active study area, and 100-cell grid remain fully functional."
+            onReset={() => setActivePanel(null)}
           >
-            {activePanel === 'kpi' && (
-              <FullscreenKPIView
-                cells={cells}
-                selectedCell={selectedCellObj}
-                plan={effectivePlan}
-                budget={effectiveBudget}
-                connectivity={connectivity}
-                onSelectCell={(id) => onSelectCell(id, false)}
-                onOpenOptimize={() => setActivePanel('optimize')}
-              />
-            )}
-            {activePanel === 'interventions' && (
-              <FullscreenInterventionsView
-                cells={cells}
-                plan={effectivePlan}
-                selectedCellId={selectedCell}
-                onSelectCell={(id) => onSelectCell(id, false)}
-                onCenterMap={(lat, lng) => centerMap(lat, lng)}
-                onOpenOptimize={() => setActivePanel('optimize')}
-              />
-            )}
-            {activePanel === 'budget' && (
-              <FullscreenBudgetView
-                budget={effectiveBudget}
-                setBudget={handleSetBudget}
-                plan={effectivePlan}
-                onOpenOptimize={() => setActivePanel('optimize')}
-              />
-            )}
-            {activePanel === 'optimize' && (
-              <FullscreenOptimizeView
-                studyId={effectiveStudyId}
-                studyName={activeStudy?.name ?? 'Campus Study'}
-                cells={cells}
-                budget={effectiveBudget}
-                weights={effectiveWeights}
-                setWeights={handleSetWeights}
-                plan={effectivePlan}
-                setPlan={handleSetPlan}
-                setLayer={onLayerChange}
-                pushToast={store?.pushToast}
-              />
-            )}
-            {activePanel === 'inspector' && (
-              <FullscreenCellInspectorView
-                selectedCellId={selectedCell}
-                cells={cells}
-                studyId={effectiveStudyId}
-                plan={effectivePlan}
-                budget={effectiveBudget}
-                onSelectCell={(id) => onSelectCell(id, false)}
-              />
-            )}
-            {activePanel === 'layers' && (
-              <FullscreenLayersView
-                layer={layer}
-                onLayerChange={onLayerChange}
-                baseMap={baseMap}
-                setBaseMap={setBaseMap}
-                showOutlines={showOutlines}
-                onOutlineToggle={onOutlineToggle}
-                opacity={opacity}
-                onOpacityChange={onOpacityChange}
-                visibleMarkerTypes={visibleMarkerTypes}
-                onToggleMarkerType={toggleMarkerType}
-              />
-            )}
-          </FullscreenPlanningPanelContainer>
+            <FullscreenPlanningPanelContainer
+              activePanel={activePanel}
+              onClose={() => setActivePanel(null)}
+              isPinned={isDrawerPinned}
+              onTogglePin={() => setIsDrawerPinned((prev) => !prev)}
+            >
+              {activePanel === 'kpi' && (
+                <FullscreenKPIView
+                  cells={cells}
+                  selectedCell={selectedCellObj}
+                  plan={effectivePlan}
+                  budget={effectiveBudget}
+                  connectivity={connectivity}
+                  onSelectCell={(id) => onSelectCell(id, false)}
+                  onOpenOptimize={() => setActivePanel('optimize')}
+                />
+              )}
+              {activePanel === 'interventions' && (
+                <FullscreenInterventionsView
+                  cells={cells}
+                  plan={effectivePlan}
+                  selectedCellId={selectedCell}
+                  onSelectCell={(id) => onSelectCell(id, false)}
+                  onCenterMap={(lat, lng) => centerMap(lat, lng)}
+                  onOpenOptimize={() => setActivePanel('optimize')}
+                />
+              )}
+              {activePanel === 'budget' && (
+                <FullscreenBudgetView
+                  budget={effectiveBudget}
+                  setBudget={handleSetBudget}
+                  plan={effectivePlan}
+                  onOpenOptimize={() => setActivePanel('optimize')}
+                />
+              )}
+              {activePanel === 'optimize' && (
+                <FullscreenOptimizeView
+                  studyId={effectiveStudyId}
+                  studyName={activeStudy?.name ?? 'Campus Study'}
+                  cells={cells}
+                  budget={effectiveBudget}
+                  weights={effectiveWeights}
+                  setWeights={handleSetWeights}
+                  plan={effectivePlan}
+                  setPlan={handleSetPlan}
+                  setLayer={onLayerChange}
+                  pushToast={store?.pushToast}
+                />
+              )}
+              {activePanel === 'inspector' && (
+                <FullscreenCellInspectorView
+                  selectedCellId={selectedCell}
+                  cells={cells}
+                  studyId={effectiveStudyId}
+                  plan={effectivePlan}
+                  budget={effectiveBudget}
+                  onSelectCell={(id) => onSelectCell(id, false)}
+                />
+              )}
+              {activePanel === 'layers' && (
+                <FullscreenLayersView
+                  layer={layer}
+                  onLayerChange={onLayerChange}
+                  baseMap={baseMap}
+                  setBaseMap={setBaseMap}
+                  showOutlines={showOutlines}
+                  onOutlineToggle={onOutlineToggle}
+                  opacity={opacity}
+                  onOpacityChange={onOpacityChange}
+                  visibleMarkerTypes={visibleMarkerTypes}
+                  onToggleMarkerType={toggleMarkerType}
+                />
+              )}
+            </FullscreenPlanningPanelContainer>
+          </FullscreenErrorBoundary>
         )}
 
         {/* FULLSCREEN PLANNING TOOLBAR */}
@@ -1073,10 +1180,10 @@ export default function GridMap({
         <div className="map-plan-summary">
           <span>
             <i className="plan-marker-dot" />
-            {effectivePlan.cellsImproved} cells actioned
+            {effectivePlan.cellsImproved ?? effectivePlan.selected?.length ?? 0} cells actioned
           </span>
-          <span>₹{effectivePlan.totalCost.toLocaleString('en-IN')} deployed</span>
-          <span>{effectivePlan.selected.length} interventions</span>
+          <span>₹{(effectivePlan.totalCost ?? 0).toLocaleString('en-IN')} deployed</span>
+          <span>{effectivePlan.selected?.length ?? 0} interventions</span>
         </div>
       )}
     </section>

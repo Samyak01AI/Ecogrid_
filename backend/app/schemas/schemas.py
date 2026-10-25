@@ -104,6 +104,8 @@ class CellResponse(BaseModel):
     priority_zone: bool = False
     data_source: DataSource = DataSource.SYNTHETIC
     data_status: DataStatus = DataStatus.DEMO
+    grid_version: str = "2.0"
+    crs: str = "EPSG:4326"
     capacity: int = 0
     distance_to_infrastructure_m: float = Field(12.0, ge=0)
     distance_to_green_m: float = Field(45.0, ge=0)
@@ -174,6 +176,9 @@ class CandidateIntervention(BaseModel):
     data_status: str = "synthetic_demo"
     model_status: str = "ml_validated"
     suitability_source: str = "ml_prediction"
+    study_area_id: Optional[str] = None
+    grid_version: str = "2.0"
+    coordinates: Optional[list[float]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +239,9 @@ class OptimizeResponse(BaseModel):
     category_benefits: dict[str, float]
     cells_improved: int
     intervention_summary: dict[str, dict]
+    study_area_id: Optional[str] = None
+    grid_version: str = "2.0"
+    crs: str = "EPSG:4326"
     data_label: str = "SYNTHETIC / DEMO — To Be Validated"
 
 

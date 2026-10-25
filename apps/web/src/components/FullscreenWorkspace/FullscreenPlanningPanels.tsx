@@ -1,17 +1,35 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Activity,
+  AlertCircle,
+  ArrowLeft,
   ArrowRight,
+  ArrowRightCircle,
+  Bot,
+  Brain,
+  Check,
   CheckCircle2,
+  Coins,
+  FileText,
   Flame,
+  GitCompareArrows,
+  Info,
   Layers3,
   Leaf,
   Map as MapIcon,
+  Maximize2,
+  Minimize2,
+  Pin,
+  PinOff,
   RefreshCw,
   Satellite,
+  Scale,
   Scan,
   ShieldAlert,
   ShieldCheck,
+  Sliders,
+  Sparkles,
   Sprout,
   Target,
   UsersRound,
@@ -30,9 +48,15 @@ import {
   type OptimizerResult,
   type ScoreWeights,
 } from '@ecogrid/domain';
-import { api } from '../../api.js';
+import {
+  api,
+  type AdaptiveComparisonResult,
+  type TerrainProfile,
+  type ValidatedStrategy,
+} from '../../api.js';
 import { CellInspector } from '../CellInspector.js';
 import type { FullscreenPanelKey } from './FullscreenPlanningToolbar.js';
+import { FullscreenErrorBoundary } from './FullscreenErrorBoundary.js';
 
 const initialInterventions = INTERVENTIONS.map((intervention) => intervention.id);
 
@@ -104,7 +128,7 @@ export function FullscreenKPIView({
 
   // Expected cooling improvement modeled from plan
   const coolingImprovement = plan
-    ? ((plan.selected.length * 0.32).toFixed(1))
+    ? (((plan.selected?.length ?? 0) * 0.32).toFixed(1))
     : null;
 
   // Selected cell metrics
@@ -121,7 +145,7 @@ export function FullscreenKPIView({
     : null;
 
   const cellPlanItem = selectedCell && plan
-    ? plan.selected.find((item) => item.cellId === selectedCell.id)
+    ? plan.selected?.find((item) => item.cellId === selectedCell.id) ?? null
     : null;
 
   // Hotspots for quick-click inspection
@@ -218,27 +242,27 @@ export function FullscreenKPIView({
             <div className="plan-summary-kpis">
               <div className="plan-kpi-item">
                 <span>INTERVENTION CELLS</span>
-                <b>{plan.cellsImproved} <small>/ {stats.totalCells}</small></b>
+                <b>{plan.cellsImproved ?? plan.selected?.length ?? 0} <small>/ {stats.totalCells}</small></b>
               </div>
               <div className="plan-kpi-item">
                 <span>TOTAL ESTIMATED COST</span>
-                <b>₹{plan.totalCost.toLocaleString('en-IN')}</b>
+                <b>₹{(plan.totalCost ?? 0).toLocaleString('en-IN')}</b>
               </div>
               <div className="plan-kpi-item">
                 <span>BUDGET UTILIZATION</span>
-                <b>{Math.round(plan.utilization * 100)}%</b>
+                <b>{Math.round((plan.utilization ?? 0) * 100)}%</b>
               </div>
             </div>
 
             <div className="plan-utilization-bar-wrap">
               <div className="plan-utilization-labels">
-                <span>Deployed: ₹{plan.totalCost.toLocaleString('en-IN')}</span>
+                <span>Deployed: ₹{(plan.totalCost ?? 0).toLocaleString('en-IN')}</span>
                 <span>Budget: ₹{budget.toLocaleString('en-IN')}</span>
               </div>
               <div className="plan-utilization-bar">
                 <div
                   className="plan-utilization-fill"
-                  style={{ width: `${Math.min(100, Math.max(2, plan.utilization * 100))}%` }}
+                  style={{ width: `${Math.min(100, Math.max(2, (plan.utilization ?? 0) * 100))}%` }}
                 />
               </div>
             </div>
@@ -412,7 +436,7 @@ export function FullscreenInterventionsView({
           </div>
           {plan && (
             <span className="interventions-plan-badge">
-              ₹{plan.totalCost.toLocaleString('en-IN')} DEPLOYED
+              ₹{(plan.totalCost ?? 0).toLocaleString('en-IN')} DEPLOYED
             </span>
           )}
         </div>
@@ -777,6 +801,618 @@ export function FullscreenBudgetView({
 }
 
 // ============================================================================
+// 4a. AI-Adaptive Comparison Components & Formatter
+// ============================================================================
+export type ComparisonBriefingSection = {
+  id: string;
+  number: number;
+  title: string;
+  iconType: 'summary' | 'diff' | 'env' | 'budget' | 'next';
+  content: string;
+  highlights?: Array<{ label: string; value: string }>;
+};
+
+export function formatComparisonBriefing(comparison: AdaptiveComparisonResult): ComparisonBriefingSection[] {
+  const { standard_metrics, adaptive_metrics, delta, study_area_name, terrain_type, budget, adaptive_strategy } = comparison;
+
+  const terrainLabel = (terrain_type || 'dense_urban').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const strategyName = adaptive_strategy?.strategy_name || 'AI-Adaptive Optimization';
+
+  // Section 1: Executive Summary
+  const execSummary = `For ${study_area_name} (${terrainLabel} profile), AI-Adaptive Optimization evaluated '${strategyName}' under a strict municipal budget ceiling of ₹${budget.toLocaleString('en-IN')}. By shifting weights from rigid generic ratios to localized microclimate priorities, the adaptive plan achieves ${delta.thermal_mitigation_delta_pct > 0 ? '+' : ''}${delta.thermal_mitigation_delta_pct}% higher thermal mitigation and ${delta.pedestrian_comfort_delta_pct > 0 ? '+' : ''}${delta.pedestrian_comfort_delta_pct}% improved pedestrian shade comfort relative to the standard baseline.`;
+
+  // Section 2: Main Differences
+  const mainDiff = `The Standard Municipal Baseline distributed ${standard_metrics.total_interventions_count} interventions uniformly across ${standard_metrics.cells_improved_count} distinct cells under fixed 30/25/25/20 weights. In contrast, AI-Adaptive concentrated ${adaptive_metrics.total_interventions_count} interventions across ${adaptive_metrics.cells_improved_count} prioritized cells, targeting higher-yield shading and cool surfaces in severe microclimate vulnerability zones.`;
+
+  // Section 3: Environmental Trade-Offs
+  const envTradeoffs = `The adaptive shift rebalanced capital toward high-impact cooling corridors. Thermal mitigation index reached ${adaptive_metrics.thermal_mitigation_index} (${delta.thermal_mitigation_delta_pct > 0 ? '+' : ''}${delta.thermal_mitigation_delta_pct}%), and pedestrian comfort reached ${adaptive_metrics.pedestrian_comfort_benefit} (${delta.pedestrian_comfort_delta_pct > 0 ? '+' : ''}${delta.pedestrian_comfort_delta_pct}%). Canopy deficit closed registered at ${adaptive_metrics.canopy_deficit_closed} (${delta.canopy_closed_delta_pct > 0 ? '+' : ''}${delta.canopy_closed_delta_pct}%), while connectivity improvement reached ${adaptive_metrics.connectivity_improvement} vs baseline ${standard_metrics.connectivity_improvement}.`;
+
+  // Section 4: Budget Implications
+  const budgetImplications = `Both models strictly adhered to the ₹${budget.toLocaleString('en-IN')} municipal ceiling. Standard spent ₹${(standard_metrics.budget_spent ?? 0).toLocaleString('en-IN')} (remaining ₹${(standard_metrics.budget_headroom ?? 0).toLocaleString('en-IN')}), while Adaptive deployed ₹${(adaptive_metrics.budget_spent ?? 0).toLocaleString('en-IN')} (remaining ₹${(adaptive_metrics.budget_headroom ?? 0).toLocaleString('en-IN')}). Cost efficiency ratio reached ${adaptive_metrics.cost_efficiency_ratio} (${delta.cost_efficiency_delta_pct > 0 ? '+' : ''}${delta.cost_efficiency_delta_pct}% higher composite environmental benefit per ₹10,000 allocated).`;
+
+  // Section 5: Recommended Next Steps
+  const nextSteps = `Apply the AI-Adaptive plan to the active GIS workspace for spatial review. Inspect individual high-priority cells with the Cell Inspector to confirm underground utility clearance, and ratify the procurement schedule with municipal stakeholders.`;
+
+  return [
+    {
+      id: 'exec-summary',
+      number: 1,
+      title: 'Executive Summary',
+      iconType: 'summary',
+      content: execSummary,
+      highlights: [
+        { label: 'Thermal Delta', value: `${delta.thermal_mitigation_delta_pct > 0 ? '+' : ''}${delta.thermal_mitigation_delta_pct}%` },
+        { label: 'Comfort Delta', value: `${delta.pedestrian_comfort_delta_pct > 0 ? '+' : ''}${delta.pedestrian_comfort_delta_pct}%` },
+      ],
+    },
+    {
+      id: 'main-diff',
+      number: 2,
+      title: 'Main Differences',
+      iconType: 'diff',
+      content: mainDiff,
+      highlights: [
+        { label: 'Standard Coverage', value: `${standard_metrics.cells_improved_count} cells · ${standard_metrics.total_interventions_count} units` },
+        { label: 'Adaptive Coverage', value: `${adaptive_metrics.cells_improved_count} cells · ${adaptive_metrics.total_interventions_count} units` },
+      ],
+    },
+    {
+      id: 'env-tradeoffs',
+      number: 3,
+      title: 'Environmental Trade-Offs',
+      iconType: 'env',
+      content: envTradeoffs,
+      highlights: [
+        { label: 'Thermal Mitigation', value: `${adaptive_metrics.thermal_mitigation_index}` },
+        { label: 'Canopy Closed', value: `${adaptive_metrics.canopy_deficit_closed}` },
+      ],
+    },
+    {
+      id: 'budget-implications',
+      number: 4,
+      title: 'Budget Implications',
+      iconType: 'budget',
+      content: budgetImplications,
+      highlights: [
+        { label: 'Capital Deployed', value: `₹${(adaptive_metrics.budget_spent ?? 0).toLocaleString('en-IN')}` },
+        { label: 'Efficiency Gain', value: `${delta.cost_efficiency_delta_pct > 0 ? '+' : ''}${delta.cost_efficiency_delta_pct}%` },
+      ],
+    },
+    {
+      id: 'next-steps',
+      number: 5,
+      title: 'Recommended Next Steps',
+      iconType: 'next',
+      content: nextSteps,
+      highlights: [
+        { label: 'Immediate Action', value: 'Apply Plan to Active Map' },
+        { label: 'Validation', value: 'Cell Inspector Feasibility Check' },
+      ],
+    },
+  ];
+}
+
+function BriefingSectionIcon({ type }: { type: ComparisonBriefingSection['iconType'] }) {
+  switch (type) {
+    case 'summary':
+      return <FileText size={14} />;
+    case 'diff':
+      return <GitCompareArrows size={14} />;
+    case 'env':
+      return <Leaf size={14} />;
+    case 'budget':
+      return <Coins size={14} />;
+    case 'next':
+      return <ArrowRightCircle size={14} />;
+    default:
+      return <FileText size={14} />;
+  }
+}
+
+function ComparisonBriefingView({ sections }: { sections: ComparisonBriefingSection[] }) {
+  return (
+    <div className="comparison-briefing-wrapper">
+      <div className="briefing-header-row">
+        <span className="panel-kicker">EXECUTIVE COMPARISON BRIEFING</span>
+        <span className="briefing-structure-tag">5-Stage Analysis</span>
+      </div>
+      <div className="briefing-sections-grid">
+        {sections.map((section) => (
+          <div key={section.id} className="briefing-section-card">
+            <div className="briefing-section-title-row">
+              <span className="briefing-section-number">{section.number}</span>
+              <BriefingSectionIcon type={section.iconType} />
+              <span className="briefing-section-title">{section.title}</span>
+            </div>
+            <p className="briefing-section-content">{section.content}</p>
+            {section.highlights && section.highlights.length > 0 && (
+              <div className="briefing-highlights-row">
+                {section.highlights.map((h, i) => (
+                  <div key={i} className="briefing-highlight-chip">
+                    <span className="briefing-highlight-label">{h.label}:</span>
+                    <span className="briefing-highlight-value">{h.value}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ComparisonCardsGrid({
+  comparisonResult,
+  activePlan,
+  onApplyAdaptive,
+  onApplyStandard,
+  isExpanded = false,
+}: {
+  comparisonResult: AdaptiveComparisonResult;
+  activePlan: OptimizerResult | null;
+  onApplyAdaptive: () => void;
+  onApplyStandard: () => void;
+  isExpanded?: boolean;
+}) {
+  const isAdaptiveActive = Boolean(
+    activePlan?.planMode === 'adaptive' ||
+      (activePlan &&
+        activePlan.selected.length === comparisonResult.adaptive_metrics.total_interventions_count &&
+        Math.abs(activePlan.totalCost - comparisonResult.adaptive_metrics.budget_spent) < 10)
+  );
+
+  const isStandardActive = Boolean(
+    activePlan?.planMode === 'standard' ||
+      (activePlan &&
+        activePlan.selected.length === comparisonResult.standard_metrics.total_interventions_count &&
+        Math.abs(activePlan.totalCost - comparisonResult.standard_metrics.budget_spent) < 10 &&
+        !isAdaptiveActive)
+  );
+
+  const standardBenefit =
+    comparisonResult.standard_plan?.combinedBenefit ??
+    (comparisonResult.standard_metrics.thermal_mitigation_index +
+      comparisonResult.standard_metrics.canopy_deficit_closed +
+      comparisonResult.standard_metrics.pedestrian_comfort_benefit +
+      comparisonResult.standard_metrics.connectivity_improvement);
+
+  const adaptiveBenefit =
+    comparisonResult.adaptive_plan?.combinedBenefit ??
+    (comparisonResult.adaptive_metrics.thermal_mitigation_index +
+      comparisonResult.adaptive_metrics.canopy_deficit_closed +
+      comparisonResult.adaptive_metrics.pedestrian_comfort_benefit +
+      comparisonResult.adaptive_metrics.connectivity_improvement);
+
+  return (
+    <div className={`comparison-cards-responsive-grid ${isExpanded ? 'is-expanded-layout' : ''}`}>
+      {/* Standard Baseline Column */}
+      <div className={`comparison-col standard-col ${isStandardActive ? 'is-active-workspace-plan' : ''}`}>
+        <div className="col-header">
+          <div className="col-header-top-row">
+            <span className="col-kicker">BASELINE APPROACH</span>
+            {isStandardActive && (
+              <span className="comparison-active-pill standard-active">
+                <CheckCircle2 size={11} /> ACTIVE IN WORKSPACE
+              </span>
+            )}
+          </div>
+          <h4>Standard Municipal Planning</h4>
+          <small>Fixed 30/25/25/20 weights</small>
+        </div>
+
+        <div className="col-metrics-list">
+          <div className="col-metric-row">
+            <span>Thermal Mitigation Index:</span>
+            <b>{comparisonResult.standard_metrics.thermal_mitigation_index}</b>
+          </div>
+          <div className="col-metric-row">
+            <span>Canopy Deficit Closed:</span>
+            <b>{comparisonResult.standard_metrics.canopy_deficit_closed}</b>
+          </div>
+          <div className="col-metric-row">
+            <span>Pedestrian Comfort Benefit:</span>
+            <b>{comparisonResult.standard_metrics.pedestrian_comfort_benefit}</b>
+          </div>
+          <div className="col-metric-row">
+            <span>Cost Efficiency Ratio:</span>
+            <b>{comparisonResult.standard_metrics.cost_efficiency_ratio}</b>
+          </div>
+          <div className="col-metric-row">
+            <span>Interventions Allocated:</span>
+            <b>{comparisonResult.standard_metrics.total_interventions_count} units</b>
+          </div>
+          <div className="col-metric-row">
+            <span>Cells Covered:</span>
+            <b>{comparisonResult.standard_metrics.cells_improved_count} / 100 cells</b>
+          </div>
+          <div className="col-metric-row">
+            <span>Capital Spent:</span>
+            <b>₹{(comparisonResult.standard_metrics.budget_spent ?? 0).toLocaleString('en-IN')}</b>
+          </div>
+          <div className="col-metric-row">
+            <span>Budget Remaining:</span>
+            <b>₹{(comparisonResult.standard_metrics.budget_headroom ?? 0).toLocaleString('en-IN')}</b>
+          </div>
+          <div className="col-metric-row highlight-benefit-row">
+            <span>Overall Modeled Benefit:</span>
+            <b className="benefit-val">+{standardBenefit > 0 ? standardBenefit.toFixed(1) : '0.0'} pts</b>
+          </div>
+        </div>
+
+        <div className="col-action-wrapper">
+          <button
+            type="button"
+            className={`button ${isStandardActive ? 'button-quiet is-active-plan' : 'button-secondary'} card-apply-btn`}
+            onClick={onApplyStandard}
+            disabled={isStandardActive}
+            title={isStandardActive ? 'This plan is currently active on the map' : 'Apply Standard Baseline Plan to active map'}
+          >
+            {isStandardActive ? (
+              <>
+                <Check size={13} /> Active Baseline Plan
+              </>
+            ) : (
+              <>
+                <Target size={13} /> Apply Standard Baseline Plan
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* AI-Adaptive Column */}
+      <div className={`comparison-col adaptive-col ${isAdaptiveActive ? 'is-active-workspace-plan' : ''}`}>
+        <div className="col-header">
+          <div className="col-header-top-row">
+            <span className="col-kicker">TERRAIN-ADAPTIVE APPROACH</span>
+            {isAdaptiveActive && (
+              <span className="comparison-active-pill adaptive-active">
+                <CheckCircle2 size={11} /> ACTIVE IN WORKSPACE
+              </span>
+            )}
+          </div>
+          <h4>AI-Adaptive Optimization</h4>
+          <small>{comparisonResult.adaptive_strategy.strategy_name}</small>
+        </div>
+
+        <div className="col-metrics-list">
+          <div className="col-metric-row">
+            <span>Thermal Mitigation Index:</span>
+            <b>
+              {comparisonResult.adaptive_metrics.thermal_mitigation_index}{' '}
+              <span className={`delta-tag ${comparisonResult.delta.thermal_mitigation_delta_pct >= 0 ? 'pos' : 'neg'}`}>
+                {comparisonResult.delta.thermal_mitigation_delta_pct > 0 ? '+' : ''}
+                {comparisonResult.delta.thermal_mitigation_delta_pct}%
+              </span>
+            </b>
+          </div>
+          <div className="col-metric-row">
+            <span>Canopy Deficit Closed:</span>
+            <b>
+              {comparisonResult.adaptive_metrics.canopy_deficit_closed}{' '}
+              <span className={`delta-tag ${comparisonResult.delta.canopy_closed_delta_pct >= 0 ? 'pos' : 'neg'}`}>
+                {comparisonResult.delta.canopy_closed_delta_pct > 0 ? '+' : ''}
+                {comparisonResult.delta.canopy_closed_delta_pct}%
+              </span>
+            </b>
+          </div>
+          <div className="col-metric-row">
+            <span>Pedestrian Comfort Benefit:</span>
+            <b>
+              {comparisonResult.adaptive_metrics.pedestrian_comfort_benefit}{' '}
+              <span className={`delta-tag ${comparisonResult.delta.pedestrian_comfort_delta_pct >= 0 ? 'pos' : 'neg'}`}>
+                {comparisonResult.delta.pedestrian_comfort_delta_pct > 0 ? '+' : ''}
+                {comparisonResult.delta.pedestrian_comfort_delta_pct}%
+              </span>
+            </b>
+          </div>
+          <div className="col-metric-row">
+            <span>Cost Efficiency Ratio:</span>
+            <b>
+              {comparisonResult.adaptive_metrics.cost_efficiency_ratio}{' '}
+              <span className={`delta-tag ${comparisonResult.delta.cost_efficiency_delta_pct >= 0 ? 'pos' : 'neg'}`}>
+                {comparisonResult.delta.cost_efficiency_delta_pct > 0 ? '+' : ''}
+                {comparisonResult.delta.cost_efficiency_delta_pct}%
+              </span>
+            </b>
+          </div>
+          <div className="col-metric-row">
+            <span>Interventions Allocated:</span>
+            <b>{comparisonResult.adaptive_metrics.total_interventions_count} units</b>
+          </div>
+          <div className="col-metric-row">
+            <span>Cells Covered:</span>
+            <b>{comparisonResult.adaptive_metrics.cells_improved_count} / 100 cells</b>
+          </div>
+          <div className="col-metric-row">
+            <span>Capital Spent:</span>
+            <b>₹{(comparisonResult.adaptive_metrics.budget_spent ?? 0).toLocaleString('en-IN')}</b>
+          </div>
+          <div className="col-metric-row">
+            <span>Budget Remaining:</span>
+            <b>₹{(comparisonResult.adaptive_metrics.budget_headroom ?? 0).toLocaleString('en-IN')}</b>
+          </div>
+          <div className="col-metric-row highlight-benefit-row">
+            <span>Overall Modeled Benefit:</span>
+            <b className="benefit-val">+{adaptiveBenefit > 0 ? adaptiveBenefit.toFixed(1) : '0.0'} pts</b>
+          </div>
+        </div>
+
+        <div className="col-action-wrapper">
+          <button
+            type="button"
+            className={`button ${isAdaptiveActive ? 'button-quiet is-active-plan' : 'button-primary'} card-apply-btn`}
+            onClick={onApplyAdaptive}
+            disabled={isAdaptiveActive}
+            title={isAdaptiveActive ? 'This plan is currently active on the map' : 'Apply AI-Adaptive Plan to active map'}
+          >
+            {isAdaptiveActive ? (
+              <>
+                <Check size={13} /> Active Adaptive Plan
+              </>
+            ) : (
+              <>
+                <Sparkles size={13} /> Apply AI-Adaptive Plan
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdaptiveComparisonDrawerView({
+  comparisonResult,
+  activePlan,
+  studyAreaName,
+  budget,
+  onBackToOptimizer,
+  onExpand,
+  onApplyAdaptive,
+  onApplyStandard,
+}: {
+  comparisonResult: AdaptiveComparisonResult;
+  activePlan: OptimizerResult | null;
+  studyAreaName: string;
+  budget: number;
+  onBackToOptimizer: () => void;
+  onExpand: () => void;
+  onApplyAdaptive: () => void;
+  onApplyStandard: () => void;
+}) {
+  const terrainLabel = (comparisonResult.terrain_type || 'dense_urban').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const briefingSections = useMemo(() => formatComparisonBriefing(comparisonResult), [comparisonResult]);
+
+  return (
+    <div className="adaptive-comparison-drawer-view">
+      {/* Sticky Header with Navigation & Metadata */}
+      <div className="comparison-drawer-sticky-header">
+        <div className="comparison-drawer-nav-row">
+          <button
+            type="button"
+            className="comparison-back-btn"
+            onClick={onBackToOptimizer}
+            title="Return to optimizer controls and parameters"
+            aria-label="Back to optimizer"
+          >
+            <ArrowLeft size={14} />
+            <span>Back to Optimizer</span>
+          </button>
+          <div className="comparison-drawer-top-actions">
+            <button
+              type="button"
+              className="comparison-expand-btn"
+              onClick={onExpand}
+              title="Expand comparison side-by-side into workspace modal"
+              aria-label="Expand comparison"
+            >
+              <Maximize2 size={13} />
+              <span>Expand</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="comparison-drawer-title-block">
+          <span className="panel-kicker">STAGE 8: AI-ADAPTIVE BENCHMARK</span>
+          <h3 className="comparison-drawer-title">Standard vs AI-Adaptive Optimization</h3>
+          <div className="comparison-meta-chips-row">
+            <span className="comparison-meta-chip study-chip" title="Active Study Area">{studyAreaName}</span>
+            <span className="comparison-meta-chip budget-chip" title="Capital Ceiling">₹{budget.toLocaleString('en-IN')}</span>
+            <span className="comparison-meta-chip terrain-chip" title="Terrain & Land-Use Profile">{terrainLabel}</span>
+            <span className="comparison-meta-chip grid-chip" title="Grid Version">Grid 2.0 (10×10)</span>
+          </div>
+        </div>
+      </div>
+
+      <p className="compare-modal-desc">
+        Both plans evaluated under identical budget (₹{comparisonResult.budget.toLocaleString('en-IN')})
+        and physical feasibility constraints using independent, shared evaluation metrics.
+      </p>
+
+      {/* Comparison Cards: Responsive Stacking */}
+      <ComparisonCardsGrid
+        comparisonResult={comparisonResult}
+        activePlan={activePlan}
+        onApplyAdaptive={onApplyAdaptive}
+        onApplyStandard={onApplyStandard}
+        isExpanded={false}
+      />
+
+      {/* Formatted 5-Section Briefing */}
+      <ComparisonBriefingView sections={briefingSections} />
+
+      {/* Fairness Disclaimer */}
+      <div className="compare-fairness-disclaimer">
+        <Info size={13} />
+        <span>{comparisonResult.fairness_disclaimer}</span>
+      </div>
+
+      {/* Drawer Action Row */}
+      <div className="comparison-drawer-footer-actions">
+        <button
+          type="button"
+          className="button button-primary"
+          onClick={onApplyAdaptive}
+        >
+          <Sparkles size={14} /> Apply AI-Adaptive Plan
+        </button>
+        <button
+          type="button"
+          className="button button-secondary"
+          onClick={onExpand}
+        >
+          <Maximize2 size={14} /> Expand Comparison
+        </button>
+        <button
+          type="button"
+          className="button button-quiet"
+          onClick={onBackToOptimizer}
+        >
+          Back to Optimizer
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AdaptiveComparisonExpandedModal({
+  comparisonResult,
+  activePlan,
+  onApplyAdaptive,
+  onApplyStandard,
+  onClose,
+}: {
+  comparisonResult: AdaptiveComparisonResult;
+  activePlan: OptimizerResult | null;
+  onApplyAdaptive: () => void;
+  onApplyStandard: () => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [onClose]);
+
+  const terrainLabel = (comparisonResult.terrain_type || 'dense_urban').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const briefingSections = useMemo(() => formatComparisonBriefing(comparisonResult), [comparisonResult]);
+
+  return (
+    <div
+      className="comparison-expanded-portal"
+      role="presentation"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="comparison-expanded-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="expanded-compare-title"
+      >
+        <div className="comparison-expanded-header">
+          <div className="expanded-header-left">
+            <button
+              type="button"
+              className="button button-secondary expanded-back-map-btn"
+              onClick={onClose}
+              title="Return to map workspace (Esc)"
+            >
+              <ArrowLeft size={14} />
+              <span>Back to Map</span>
+            </button>
+            <div className="expanded-title-group">
+              <span className="panel-kicker">STAGE 8: AI-ADAPTIVE BENCHMARK</span>
+              <h2 id="expanded-compare-title" className="expanded-title">
+                Standard vs AI-Adaptive Optimization Comparison
+              </h2>
+              <div className="comparison-meta-chips-row">
+                <span className="comparison-meta-chip study-chip">{comparisonResult.study_area_name}</span>
+                <span className="comparison-meta-chip budget-chip">₹{comparisonResult.budget.toLocaleString('en-IN')}</span>
+                <span className="comparison-meta-chip terrain-chip">{terrainLabel}</span>
+                <span className="comparison-meta-chip grid-chip">Grid 2.0 (10×10)</span>
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="icon-button expanded-close-btn"
+            onClick={onClose}
+            aria-label="Close expanded comparison"
+            title="Close (Esc)"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="comparison-expanded-scroll-area">
+          <p className="compare-modal-desc">
+            Both plans evaluated under identical budget ceiling (₹{comparisonResult.budget.toLocaleString('en-IN')})
+            and physical feasibility constraints using independent, shared evaluation metrics.
+          </p>
+
+          <ComparisonCardsGrid
+            comparisonResult={comparisonResult}
+            activePlan={activePlan}
+            onApplyAdaptive={onApplyAdaptive}
+            onApplyStandard={onApplyStandard}
+            isExpanded={true}
+          />
+
+          <ComparisonBriefingView sections={briefingSections} />
+
+          <div className="compare-fairness-disclaimer">
+            <Info size={14} />
+            <span>{comparisonResult.fairness_disclaimer}</span>
+          </div>
+        </div>
+
+        <div className="comparison-expanded-footer">
+          <div className="expanded-footer-left">
+            <span className="expanded-hint">Tip: Press <kbd>Esc</kbd> to return to map anytime</span>
+          </div>
+          <div className="expanded-footer-actions">
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={onApplyStandard}
+            >
+              <Target size={14} /> Apply Standard Plan
+            </button>
+            <button
+              type="button"
+              className="button button-primary"
+              onClick={() => {
+                onApplyAdaptive();
+                onClose();
+              }}
+            >
+              <Sparkles size={14} /> Apply AI-Adaptive Plan & View Map
+            </button>
+            <button
+              type="button"
+              className="button button-quiet"
+              onClick={onClose}
+            >
+              Back to Map
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // 4. Fullscreen Optimization Controls Panel
 // ============================================================================
 type FullscreenOptimizeProps = {
@@ -807,7 +1443,121 @@ export function FullscreenOptimizeView({
   const [working, setWorking] = useState(false);
   const [enabled, setEnabled] = useState<InterventionId[]>(initialInterventions);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<{
+    message: string;
+    timestamp: string;
+    stage: string;
+  } | null>(null);
   const [efficiencyGain, setEfficiencyGain] = useState<number | null>(null);
+
+  // Stage 8: Adaptive AI State
+  const [planningMode, setPlanningMode] = useState<'standard' | 'adaptive'>('adaptive');
+  const [terrain, setTerrain] = useState<TerrainProfile | null>(null);
+  const [strategy, setStrategy] = useState<ValidatedStrategy | null>(null);
+  const [characterizing, setCharacterizing] = useState(false);
+  const [generatingStrategy, setGeneratingStrategy] = useState(false);
+  const [comparing, setComparing] = useState(false);
+  const [comparisonResult, setComparisonResult] = useState<AdaptiveComparisonResult | null>(null);
+  const [comparisonViewActive, setComparisonViewActive] = useState(false);
+  const [comparisonExpanded, setComparisonExpanded] = useState(false);
+
+  // Load terrain profile on study area change
+  useEffect(() => {
+    let active = true;
+    const fetchTerrain = async () => {
+      try {
+        setCharacterizing(true);
+        const profile = await api.adaptiveCharacterize(studyId);
+        if (active) {
+          setTerrain(profile);
+        }
+      } catch {
+        // Fallback or offline state handled gracefully
+      } finally {
+        if (active) setCharacterizing(false);
+      }
+    };
+    fetchTerrain();
+    return () => {
+      active = false;
+    };
+  }, [studyId]);
+
+  const handleGenerateStrategy = async () => {
+    setGeneratingStrategy(true);
+    setErrorMessage(null);
+    try {
+      const res = await api.adaptiveStrategy({
+        studyId,
+        budget,
+      });
+      setStrategy(res);
+
+      // Align weights with validated strategy
+      const p = res.priority_weights;
+      const nextWeights: ScoreWeights = {
+        heat: Math.round(p.heat * 100),
+        vegetation: Math.round(p.vegetation * 100),
+        pedestrian: Math.round(p.pedestrian * 100),
+        connectivity: Math.max(5, 100 - (Math.round(p.heat * 100) + Math.round(p.vegetation * 100) + Math.round(p.pedestrian * 100))),
+      };
+      setWeights(nextWeights);
+
+      if (res.fallback_applied) {
+        pushToast?.('Baseline fallback strategy applied by Validation Gateway.', 'info');
+      } else {
+        pushToast?.(`Grok strategy '${res.strategy_name}' validated successfully!`, 'success');
+      }
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Strategy recommendation failed.');
+      pushToast?.('Grok strategy generation failed; check connection or settings.', 'error');
+    } finally {
+      setGeneratingStrategy(false);
+    }
+  };
+
+  const handleRunComparison = async () => {
+    setComparing(true);
+    setErrorMessage(null);
+    try {
+      const res = await api.adaptiveCompare({
+        studyId,
+        budget,
+        enabledInterventions: enabled.map((id) => id.toString()),
+      });
+      setComparisonResult(res);
+      setComparisonViewActive(true);
+      pushToast?.('Standard vs AI-Adaptive comparison computed.', 'success');
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Comparison calculation failed.');
+      pushToast?.('Unable to compute comparison.', 'error');
+    } finally {
+      setComparing(false);
+    }
+  };
+
+  const handleApplyAdaptive = () => {
+    if (!comparisonResult) return;
+    setPlan({
+      ...comparisonResult.adaptive_plan,
+      planMode: 'adaptive',
+      strategyName: comparisonResult.adaptive_strategy.strategy_name,
+    });
+    setStrategy(comparisonResult.adaptive_strategy);
+    setLayer('recommended');
+    pushToast?.('AI-Adaptive plan applied to active workspace.', 'success');
+  };
+
+  const handleApplyStandard = () => {
+    if (!comparisonResult) return;
+    setPlan({
+      ...comparisonResult.standard_plan,
+      planMode: 'standard',
+      strategyName: 'Standard Municipal Baseline',
+    });
+    setLayer('recommended');
+    pushToast?.('Standard baseline plan applied to active workspace.', 'info');
+  };
 
   const weightSum = weights.heat + weights.vegetation + weights.pedestrian + weights.connectivity;
   const weightsValid = weightSum === 100;
@@ -840,39 +1590,41 @@ export function FullscreenOptimizeView({
   const handleRunOptimization = async () => {
     setWorking(true);
     setErrorMessage(null);
+    setErrorDetails(null);
 
-    // Save current studyId to prevent stale responses
     const targetStudyId = studyId;
 
     try {
-      // Call backend OR-Tools solver
-      const apiResult = await api.optimize({
-        studyId: targetStudyId,
-        budget,
-        weights,
-        enabledInterventions: enabled,
-      });
+      if (planningMode === 'adaptive') {
+        const apiResult = await api.adaptiveOptimize({
+          studyId: targetStudyId,
+          budget,
+          mode: 'adaptive',
+          customStrategy: strategy ? strategy : undefined,
+          enabledInterventions: enabled.map((id) => id.toString()),
+          weights,
+        });
 
-      // Verify study area hasn't changed during request
-      if (targetStudyId !== studyId) return;
+        if (targetStudyId !== studyId) return;
 
-      const ext = apiResult as OptimizerResult & {
-        benchmark?: { efficiency_gain_pct?: number };
-      };
-      if (ext.benchmark?.efficiency_gain_pct !== undefined) {
-        setEfficiencyGain(ext.benchmark.efficiency_gain_pct);
-      }
-
-      setPlan(apiResult);
-      setLayer('recommended');
-      pushToast?.(
-        `OR-Tools solver complete · ${apiResult.selected.length} interventions allocated across ${apiResult.cellsImproved} cells`,
-        'success'
-      );
-    } catch {
-      // Deterministic domain fallback if offline / error
-      try {
-        const localResult = optimizePlan(cells, {
+        setPlan({
+          ...apiResult.plan,
+          planMode: 'adaptive',
+          strategyName: (apiResult.strategy as { strategy_name?: string })?.strategy_name ?? strategy?.strategy_name ?? 'AI-Adaptive Optimization',
+        });
+        if (apiResult.strategy && 'strategy_id' in apiResult.strategy) {
+          setStrategy(apiResult.strategy as ValidatedStrategy);
+        }
+        setLayer('recommended');
+        setErrorMessage(null);
+        setErrorDetails(null);
+        pushToast?.(
+          `Adaptive solver complete · ${apiResult.plan.selected.length} interventions allocated across ${apiResult.plan.cellsImproved} cells`,
+          'success'
+        );
+      } else {
+        const apiResult = await api.optimize({
+          studyId: targetStudyId,
           budget,
           weights,
           enabledInterventions: enabled,
@@ -880,35 +1632,110 @@ export function FullscreenOptimizeView({
 
         if (targetStudyId !== studyId) return;
 
-        setPlan(localResult);
+        const ext = apiResult as OptimizerResult & {
+          benchmark?: { efficiency_gain_pct?: number };
+        };
+        if (ext.benchmark?.efficiency_gain_pct !== undefined) {
+          setEfficiencyGain(ext.benchmark.efficiency_gain_pct);
+        }
+
+        setPlan({
+          ...apiResult,
+          planMode: 'standard',
+          strategyName: 'Standard Municipal Baseline',
+        });
         setLayer('recommended');
-        setEfficiencyGain(null);
-        setErrorMessage(
-          'Backend solver offline. Seeded deterministic domain solver generated the plan.'
-        );
+        setErrorMessage(null);
+        setErrorDetails(null);
         pushToast?.(
-          'Backend solver offline; using deterministic domain fallback.',
-          'info'
-        );
-      } catch (fallbackErr) {
-        setErrorMessage(
-          fallbackErr instanceof Error ? fallbackErr.message : 'Optimization failed.'
+          `Standard solver complete · ${apiResult.selected.length} interventions allocated across ${apiResult.cellsImproved} cells`,
+          'success'
         );
       }
+    } catch (err: unknown) {
+      if (targetStudyId !== studyId) return;
+
+      const rawMsg = err instanceof Error ? err.message : String(err || 'Unknown optimization error');
+      const cleanMsg = rawMsg
+        .replace(/(?:xai-|grok-|Bearer\s+|api[_-]?key[=:\s]+)[a-zA-Z0-9_\-\.]{8,}/gi, '[REDACTED_SECRET]')
+        .replace(/password[=:\s]+[^\s&]+/gi, 'password=[REDACTED]');
+
+      const userMsg =
+        'Adaptive optimization could not be completed. Your existing plan is unchanged. Review the error or retry.';
+      setErrorMessage(userMsg);
+      setErrorDetails({
+        message: cleanMsg,
+        timestamp: new Date().toLocaleTimeString(),
+        stage: planningMode === 'adaptive' ? 'AI-Adaptive Optimization Pipeline' : 'Standard CP-SAT Optimization',
+      });
+      pushToast?.('Optimization failed. Your existing plan remains unchanged.', 'error');
     } finally {
       setWorking(false);
     }
   };
 
+  if (comparisonViewActive && comparisonResult) {
+    return (
+      <div className="fullscreen-panel-content optimize-panel-view">
+        <AdaptiveComparisonDrawerView
+          comparisonResult={comparisonResult}
+          activePlan={plan}
+          studyAreaName={studyName}
+          budget={budget}
+          onBackToOptimizer={() => setComparisonViewActive(false)}
+          onExpand={() => setComparisonExpanded(true)}
+          onApplyAdaptive={handleApplyAdaptive}
+          onApplyStandard={handleApplyStandard}
+        />
+        {comparisonExpanded && typeof document !== 'undefined' &&
+          createPortal(
+            <AdaptiveComparisonExpandedModal
+              comparisonResult={comparisonResult}
+              activePlan={plan}
+              onApplyAdaptive={handleApplyAdaptive}
+              onApplyStandard={handleApplyStandard}
+              onClose={() => setComparisonExpanded(false)}
+            />,
+            document.body
+          )
+        }
+      </div>
+    );
+  }
+
   return (
     <div className="fullscreen-panel-content optimize-panel-view">
       <div className="optimize-panel-header">
-        <span className="panel-kicker">MATHEMATICAL PROGRAMMING</span>
-        <h3>OR-Tools CP-SAT Optimizer</h3>
+        <span className="panel-kicker">MATHEMATICAL PROGRAMMING & GROK DECISION ENGINE</span>
+        <h3>OR-Tools & Adaptive AI Optimizer</h3>
         <p className="panel-subtitle">
-          Constrained combinatorial optimization balancing capital budget vs multidimensional environmental uplift.
+          Constrained combinatorial optimization with location-aware terrain adaptation and multi-objective scoring.
         </p>
       </div>
+
+      {/* Mode Switcher: Standard Baseline vs AI-Adaptive */}
+      <section className="planning-mode-switcher-section">
+        <div className="mode-toggle-pill-group">
+          <button
+            type="button"
+            className={`mode-pill-btn ${planningMode === 'adaptive' ? 'is-active' : ''}`}
+            onClick={() => setPlanningMode('adaptive')}
+          >
+            <Brain size={14} className="mode-icon" />
+            <span>AI-Adaptive Mode</span>
+            <span className="mode-tag-glow">Grok-Powered</span>
+          </button>
+          <button
+            type="button"
+            className={`mode-pill-btn ${planningMode === 'standard' ? 'is-active' : ''}`}
+            onClick={() => setPlanningMode('standard')}
+          >
+            <Sliders size={14} className="mode-icon" />
+            <span>Standard Mode</span>
+            <span className="mode-tag-dim">Fixed Baseline</span>
+          </button>
+        </div>
+      </section>
 
       {/* Review Planning Configuration */}
       <section className="optimize-config-review">
@@ -922,19 +1749,170 @@ export function FullscreenOptimizeView({
         </div>
       </section>
 
-      {/* Optimization Objectives Weights */}
+      {/* AI-Adaptive Mode: Terrain Profile & Grok Strategy Card */}
+      {planningMode === 'adaptive' && (
+        <section className="adaptive-terrain-section">
+          {/* Detected Terrain Profile Card */}
+          <div className="terrain-profile-card">
+            <div className="terrain-header">
+              <div className="terrain-title-col">
+                <span className="panel-kicker">EMPIRICAL TERRAIN PROFILE</span>
+                <h4>
+                  {terrain ? (
+                    <>
+                      <span className={`terrain-badge tone-${terrain.terrain_type}`}>
+                        {terrain.terrain_type.toUpperCase().replace('_', ' ')}
+                      </span>
+                      <small className="terrain-confidence">
+                        {Math.round(terrain.confidence * 100)}% Confidence
+                      </small>
+                    </>
+                  ) : characterizing ? (
+                    'Analyzing Geographic Features…'
+                  ) : (
+                    'Regional Profile'
+                  )}
+                </h4>
+              </div>
+
+              <button
+                type="button"
+                className="button button-secondary button-small grok-generate-btn"
+                disabled={generatingStrategy}
+                onClick={() => void handleGenerateStrategy()}
+                title="Request Grok AI to recommend a validated strategy"
+              >
+                {generatingStrategy ? (
+                  <>
+                    <RefreshCw size={13} className="spin" />
+                    <span>Recommending…</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={13} />
+                    <span>Recommend Strategy</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {terrain && (
+              <>
+                <p className="terrain-reason-text">{terrain.classification_reason}</p>
+
+                {/* Key indicators chips */}
+                <div className="terrain-metrics-strip">
+                  <div className="terrain-metric-chip">
+                    <span>Built-up:</span>
+                    <b>{Math.round(terrain.natural_terrain.mean_built_surface_ratio * 100)}%</b>
+                  </div>
+                  <div className="terrain-metric-chip">
+                    <span>Avg Heat:</span>
+                    <b>{Math.round(terrain.environmental_indicators.mean_heat_score)}/100</b>
+                  </div>
+                  <div className="terrain-metric-chip">
+                    <span>Veg Deficit:</span>
+                    <b>{Math.round(terrain.environmental_indicators.mean_vegetation_deficit)}/100</b>
+                  </div>
+                  <div className="terrain-metric-chip">
+                    <span>Ped Exposure:</span>
+                    <b>{Math.round(terrain.environmental_indicators.mean_pedestrian_exposure)}/100</b>
+                  </div>
+                </div>
+
+                {/* Detected Statutory Constraints */}
+                {terrain.detected_constraints.length > 0 && (
+                  <div className="terrain-constraints-box">
+                    <span className="constraint-label">
+                      <ShieldAlert size={12} color="#F59E0B" /> Enforced Statutory Clearances:
+                    </span>
+                    <div className="constraint-tags-row">
+                      {terrain.detected_constraints.map((c) => (
+                        <span key={c} className="constraint-pill">
+                          {c.replace(/_/g, ' ')}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Validated Strategy Briefing Card */}
+          {strategy && (
+            <div className="strategy-briefing-card">
+              <div className="strategy-briefing-top">
+                <div>
+                  <span className="panel-kicker">ACTIVE ADAPTIVE STRATEGY</span>
+                  <h4 className="strategy-name-title">{strategy.strategy_name}</h4>
+                </div>
+
+                <div className="strategy-status-badge">
+                  {strategy.validation_status === 'VALIDATED' && !strategy.fallback_applied ? (
+                    <span className="validation-pill valid-pill">
+                      <ShieldCheck size={13} /> VALIDATED BY GATEWAY
+                    </span>
+                  ) : (
+                    <span className="validation-pill fallback-pill">
+                      <AlertCircle size={13} /> BASELINE FALLBACK APPLIED
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <p className="strategy-explanation-p">{strategy.explanation}</p>
+
+              <div className="strategy-tags-row">
+                <span className="strategy-meta-tag">
+                  <Brain size={12} /> {strategy.model_id} (v{strategy.model_version})
+                </span>
+                <span className="strategy-meta-tag">
+                  <Scale size={12} /> Formula: {strategy.formula_id}
+                </span>
+              </div>
+
+              {strategy.preferred_interventions.length > 0 && (
+                <div className="preferred-interventions-row">
+                  <span className="preferred-label">Recommended Interventions:</span>
+                  {strategy.preferred_interventions.map((item) => (
+                    <span key={item} className="preferred-chip">
+                      {item.replace(/_/g, ' ')}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Priority Weights Section */}
       <section className="optimize-weights-section">
         <div className="weights-header">
           <div>
-            <span className="panel-kicker">OBJECTIVE BALANCING</span>
-            <h4>Priority Weights (Must Sum to 100%)</h4>
+            <span className="panel-kicker">
+              {planningMode === 'adaptive' ? 'AI-ADAPTIVE WEIGHTS' : 'STANDARD PRIORITY WEIGHTS'}
+            </span>
+            <h4>Objective Balancing (Must Sum to 100%)</h4>
           </div>
           <button
             type="button"
             className="reset-weights-btn"
             onClick={() => {
-              setWeights({ heat: 30, vegetation: 25, pedestrian: 25, connectivity: 20 });
-              pushToast?.('Default objective weights restored.', 'info');
+              if (planningMode === 'adaptive' && strategy) {
+                const p = strategy.priority_weights;
+                setWeights({
+                  heat: Math.round(p.heat * 100),
+                  vegetation: Math.round(p.vegetation * 100),
+                  pedestrian: Math.round(p.pedestrian * 100),
+                  connectivity: Math.max(5, 100 - (Math.round(p.heat * 100) + Math.round(p.vegetation * 100) + Math.round(p.pedestrian * 100))),
+                });
+                pushToast?.('Adaptive strategy weights restored.', 'info');
+              } else {
+                setWeights({ heat: 30, vegetation: 25, pedestrian: 25, connectivity: 20 });
+                pushToast?.('Default objective weights restored.', 'info');
+              }
             }}
           >
             Reset
@@ -944,14 +1922,14 @@ export function FullscreenOptimizeView({
         <div className="weights-sliders-list">
           <div className="weight-row">
             <span className="weight-icon tone-coral"><Flame size={14} /></span>
-            <span className="weight-name">Heat Reduction</span>
+            <span className="weight-name">Heat Mitigation</span>
             <input
               type="range"
               min="5"
-              max="60"
+              max="70"
               step="5"
               value={weights.heat}
-              aria-label="Heat reduction weight"
+              aria-label="Heat mitigation weight"
               onChange={(e) => updateWeight('heat', Number(e.target.value))}
             />
             <strong>{weights.heat}%</strong>
@@ -959,11 +1937,11 @@ export function FullscreenOptimizeView({
 
           <div className="weight-row">
             <span className="weight-icon tone-mint"><Leaf size={14} /></span>
-            <span className="weight-name">Vegetation Recovery</span>
+            <span className="weight-name">Vegetation & Canopy</span>
             <input
               type="range"
               min="5"
-              max="60"
+              max="70"
               step="5"
               value={weights.vegetation}
               aria-label="Vegetation recovery weight"
@@ -978,7 +1956,7 @@ export function FullscreenOptimizeView({
             <input
               type="range"
               min="5"
-              max="60"
+              max="70"
               step="5"
               value={weights.pedestrian}
               aria-label="Pedestrian comfort weight"
@@ -993,7 +1971,7 @@ export function FullscreenOptimizeView({
             <input
               type="range"
               min="5"
-              max="60"
+              max="70"
               step="5"
               value={weights.connectivity}
               aria-label="Green connectivity weight"
@@ -1034,40 +2012,128 @@ export function FullscreenOptimizeView({
       </section>
 
       {errorMessage && (
-        <div className="optimize-error-banner" role="alert">
-          <ShieldAlert size={16} />
-          <span>{errorMessage}</span>
+        <div className="fullscreen-panel-error-card" role="alert" style={{ margin: '10px 0 14px' }}>
+          <div className="error-card-header">
+            <div className="error-icon-box">
+              <ShieldAlert size={20} className="error-alert-icon" />
+            </div>
+            <div className="error-card-titles">
+              <span className="error-card-kicker">NON-DESTRUCTIVE RECOVERY</span>
+              <h4 className="error-card-title">Optimization Solver Alert</h4>
+            </div>
+          </div>
+
+          <p className="error-card-message">{errorMessage}</p>
+
+          <div className="error-card-safety-notice">
+            <ShieldCheck size={14} className="safety-icon" />
+            <span>Existing plan, map view, and 100-cell geographic state remain completely unchanged.</span>
+          </div>
+
+          <div className="error-card-actions">
+            <button
+              type="button"
+              className="error-retry-btn"
+              disabled={working}
+              onClick={() => void handleRunOptimization()}
+            >
+              <RefreshCw size={13} className={working ? 'spin' : ''} />
+              <span>Retry Optimization</span>
+            </button>
+            <button
+              type="button"
+              className="error-dismiss-btn"
+              onClick={() => {
+                setErrorMessage(null);
+                setErrorDetails(null);
+              }}
+            >
+              <X size={13} />
+              <span>Dismiss</span>
+            </button>
+          </div>
+
+          {errorDetails && (
+            <details className="error-technical-details">
+              <summary>
+                <span>Technical Diagnostics</span>
+              </summary>
+              <div className="technical-details-content">
+                <div className="tech-item">
+                  <strong>Stage:</strong> <code>{errorDetails.stage}</code>
+                </div>
+                <div className="tech-item">
+                  <strong>Timestamp:</strong> <code>{errorDetails.timestamp}</code>
+                </div>
+                <div className="tech-item">
+                  <strong>Details:</strong> <code>{errorDetails.message}</code>
+                </div>
+                <div className="tech-hint">No credentials or Grok API secrets are exposed.</div>
+              </div>
+            </details>
+          )}
         </div>
       )}
 
-      {/* Run Optimization Button */}
-      <button
-        type="button"
-        className="button button-primary run-optimizer-btn"
-        disabled={working || !weightsValid || enabled.length === 0}
-        onClick={() => void handleRunOptimization()}
-      >
-        {working ? (
-          <>
-            <RefreshCw size={16} className="spin" />
-            <span>Solving CP-SAT Integer Program…</span>
-          </>
-        ) : (
-          <>
-            <WandSparkles size={16} />
-            <span>Run OR-Tools Budget Optimizer</span>
-          </>
-        )}
-      </button>
+      {/* Action Buttons Row */}
+      <div className="optimize-actions-cluster">
+        <button
+          type="button"
+          className="button button-primary run-optimizer-btn"
+          disabled={working || !weightsValid || enabled.length === 0}
+          onClick={() => void handleRunOptimization()}
+        >
+          {working ? (
+            <>
+              <RefreshCw size={16} className="spin" />
+              <span>Solving CP-SAT Integer Program…</span>
+            </>
+          ) : (
+            <>
+              <WandSparkles size={16} />
+              <span>
+                {planningMode === 'adaptive' ? 'Run Adaptive Optimization' : 'Run Standard OR-Tools Solver'}
+              </span>
+            </>
+          )}
+        </button>
 
-      {/* Solver Results */}
+        {/* Compare Standard vs Adaptive Button */}
+        <button
+          type="button"
+          className="button button-secondary compare-modes-btn"
+          disabled={comparing}
+          onClick={() => {
+            if (comparisonResult) {
+              setComparisonViewActive(true);
+            } else {
+              void handleRunComparison();
+            }
+          }}
+          title="Compare Standard Baseline vs AI-Adaptive allocation side-by-side"
+        >
+          {comparing ? (
+            <>
+              <RefreshCw size={14} className="spin" />
+              <span>Evaluating Comparison…</span>
+            </>
+          ) : (
+            <>
+              <GitCompareArrows size={14} />
+              <span>{comparisonResult ? 'View Comparison vs AI-Adaptive' : 'Compare Standard vs AI-Adaptive'}</span>
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Solver Results Section */}
       {plan && (
         <section className="optimize-results-section">
           <div className="results-badge-row">
             <span className="result-valid-badge">
               <ShieldCheck size={13} /> CP-SAT STRICTLY ENFORCED
             </span>
-            <span className="result-cell-badge">{plan.cellsImproved} CELLS ACTIONED</span>
+            <span className="result-cell-badge">{(plan.cellsImproved ?? plan.selected?.length ?? 0)} CELLS ACTIONED</span>
           </div>
 
           {efficiencyGain !== null && (
@@ -1080,12 +2146,12 @@ export function FullscreenOptimizeView({
           <div className="results-metrics-grid">
             <div className="results-stat-box">
               <span>ALLOCATED CAPITAL</span>
-              <b>₹{plan.totalCost.toLocaleString('en-IN')}</b>
-              <small>{Math.round(plan.utilization * 100)}% utilization</small>
+              <b>₹{(plan.totalCost ?? 0).toLocaleString('en-IN')}</b>
+              <small>{Math.round((plan.utilization ?? 0) * 100)}% utilization</small>
             </div>
             <div className="results-stat-box">
               <span>COMBINED BENEFIT</span>
-              <b className="benefit-val">+{Math.round(plan.combinedBenefit)} pts</b>
+              <b className="benefit-val">+{(Math.round(plan.combinedBenefit ?? 0))} pts</b>
               <small>Multidimensional score</small>
             </div>
           </div>
@@ -1101,6 +2167,20 @@ export function FullscreenOptimizeView({
           </div>
         </section>
       )}
+
+      {/* Expanded Comparison Portal (when opened from outside) */}
+      {comparisonExpanded && comparisonResult && typeof document !== 'undefined' &&
+        createPortal(
+          <AdaptiveComparisonExpandedModal
+            comparisonResult={comparisonResult}
+            activePlan={plan}
+            onApplyAdaptive={handleApplyAdaptive}
+            onApplyStandard={handleApplyStandard}
+            onClose={() => setComparisonExpanded(false)}
+          />,
+          document.body
+        )
+      }
     </div>
   );
 }
@@ -1337,6 +2417,8 @@ export function FullscreenLayersView({
 type FullscreenPanelContainerProps = {
   activePanel: FullscreenPanelKey | null;
   onClose: () => void;
+  isPinned?: boolean;
+  onTogglePin?: () => void;
   children: React.ReactNode;
 };
 
@@ -1352,6 +2434,8 @@ const PANEL_METADATA: Record<FullscreenPanelKey, { kicker: string; title: string
 export function FullscreenPlanningPanelContainer({
   activePanel,
   onClose,
+  isPinned = false,
+  onTogglePin,
   children,
 }: FullscreenPanelContainerProps) {
   if (!activePanel) return null;
@@ -1360,7 +2444,7 @@ export function FullscreenPlanningPanelContainer({
 
   return (
     <aside
-      className="fullscreen-contextual-drawer"
+      className={`fullscreen-contextual-drawer ${isPinned ? 'is-pinned' : ''}`}
       role="region"
       aria-label={`${meta.title} panel`}
     >
@@ -1369,19 +2453,35 @@ export function FullscreenPlanningPanelContainer({
           <span className="panel-kicker">{meta.kicker}</span>
           <h2 className="drawer-title">{meta.title}</h2>
         </div>
-        <button
-          type="button"
-          className="fullscreen-drawer-close-btn"
-          title="Close panel (Esc)"
-          aria-label="Close contextual panel"
-          onClick={onClose}
-        >
-          <X size={17} />
-        </button>
+        <div className="drawer-header-actions">
+          {onTogglePin && (
+            <button
+              type="button"
+              className={`fullscreen-drawer-pin-btn ${isPinned ? 'is-active' : ''}`}
+              title={isPinned ? 'Unpin drawer (auto-collapsible)' : 'Pin drawer (keep open while inspecting cells)'}
+              aria-label={isPinned ? 'Unpin drawer' : 'Pin drawer'}
+              aria-pressed={isPinned}
+              onClick={onTogglePin}
+            >
+              {isPinned ? <PinOff size={15} /> : <Pin size={15} />}
+            </button>
+          )}
+          <button
+            type="button"
+            className="fullscreen-drawer-close-btn"
+            title="Close panel (Esc)"
+            aria-label="Close contextual panel"
+            onClick={onClose}
+          >
+            <X size={17} />
+          </button>
+        </div>
       </div>
 
       <div className="fullscreen-drawer-body">
-        {children}
+        <FullscreenErrorBoundary panelName={meta.title} onReset={onClose}>
+          {children}
+        </FullscreenErrorBoundary>
       </div>
     </aside>
   );

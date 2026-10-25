@@ -1,4 +1,4 @@
-import type { Cell, ConnectivityResult, InterventionId, OptimizerInput, OptimizerResult, ScoreWeights, StudyArea, WhatIfResult } from '@ecogrid/domain';
+import type { Candidate, Cell, ConnectivityResult, InterventionId, OptimizerInput, OptimizerResult, ScoreWeights, StudyArea, WhatIfResult } from '@ecogrid/domain';
 
 function getCookie(name: string): string | null {
   if (typeof document === 'undefined') return null;
@@ -62,6 +62,197 @@ export type AdminUserItem = {
 export type PlaceResult = { id: string; displayName: string; lat: number; lng: number; type: string };
 export type Scenario = { id: string; name: string; studyId: string; description?: string; budget: number; weights: ScoreWeights; enabledInterventions: readonly InterventionId[]; plan: OptimizerResult; createdAt: string };
 
+export function normalizeOptimizerResult(raw: unknown, fallbackStudyId?: string): OptimizerResult {
+  if (!raw || typeof raw !== 'object') {
+    return {
+      studyAreaId: fallbackStudyId ?? 'study-delhi',
+      gridVersion: '2.0',
+      crs: 'EPSG:4326',
+      selected: [],
+      rejected: [],
+      totalCost: 0,
+      remainingBudget: 0,
+      utilization: 0,
+      combinedBenefit: 0,
+      categoryBenefits: { heat: 0, vegetation: 0, pedestrian: 0, connectivity: 0 },
+      cellsImproved: 0,
+      validation: { valid: true, violations: [] },
+      planConfidence: 0.9,
+    };
+  }
+
+  const r = raw as Record<string, unknown>;
+
+  const totalCost = Number.isFinite(r.totalCost)
+    ? Number(r.totalCost)
+    : Number.isFinite(r.total_cost)
+    ? Number(r.total_cost)
+    : 0;
+
+  const remainingBudget = Number.isFinite(r.remainingBudget)
+    ? Number(r.remainingBudget)
+    : Number.isFinite(r.remaining_budget)
+    ? Number(r.remaining_budget)
+    : 0;
+
+  const utilization = Number.isFinite(r.utilization)
+    ? Number(r.utilization)
+    : (totalCost + remainingBudget > 0)
+    ? totalCost / (totalCost + remainingBudget)
+    : 0;
+
+  const combinedBenefit = Number.isFinite(r.combinedBenefit)
+    ? Number(r.combinedBenefit)
+    : Number.isFinite(r.combined_benefit)
+    ? Number(r.combined_benefit)
+    : 0;
+
+  const studyAreaId =
+    typeof r.studyAreaId === 'string'
+      ? r.studyAreaId
+      : typeof r.study_area_id === 'string'
+      ? r.study_area_id
+      : typeof r.studyId === 'string'
+      ? r.studyId
+      : typeof r.study_id === 'string'
+      ? r.study_id
+      : fallbackStudyId ?? 'study-delhi';
+
+  const gridVersion =
+    typeof r.gridVersion === 'string'
+      ? r.gridVersion
+      : typeof r.grid_version === 'string'
+      ? r.grid_version
+      : '2.0';
+
+  const crs = typeof r.crs === 'string' ? r.crs : 'EPSG:4326';
+
+  const rawCat = (r.categoryBenefits || r.category_benefits || {}) as Record<string, unknown>;
+  const categoryBenefits = {
+    heat: Number.isFinite(rawCat.heat) ? Number(rawCat.heat) : 0,
+    vegetation: Number.isFinite(rawCat.vegetation)
+      ? Number(rawCat.vegetation)
+      : Number.isFinite(rawCat.greenery)
+      ? Number(rawCat.greenery)
+      : 0,
+    pedestrian: Number.isFinite(rawCat.pedestrian) ? Number(rawCat.pedestrian) : 0,
+    connectivity: Number.isFinite(rawCat.connectivity) ? Number(rawCat.connectivity) : 0,
+  };
+
+  const rawSelected = Array.isArray(r.selected) ? r.selected : [];
+  const selected: Candidate[] = rawSelected.map((item: unknown) => {
+    const c = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+    const cellId = String(c.cellId ?? c.cell_id ?? 'unknown');
+    let intId = String(c.interventionId ?? c.intervention_id ?? 'native_trees') as InterventionId;
+    if ((intId as string) === 'pollinator_corridor') {
+      intId = 'pollinator_strip' as InterventionId;
+    }
+    const cost = Number.isFinite(c.cost) ? Number(c.cost) : 0;
+    const cBen = Number.isFinite(c.combinedBenefit)
+      ? Number(c.combinedBenefit)
+      : Number.isFinite(c.combined_benefit)
+      ? Number(c.combined_benefit)
+      : 0;
+    const bPerC = Number.isFinite(c.benefitPerCost)
+      ? Number(c.benefitPerCost)
+      : Number.isFinite(c.benefit_per_cost)
+      ? Number(c.benefit_per_cost)
+      : (cost > 0 ? cBen / cost : 0);
+
+    const cCat = (c.categoryBenefit || c.category_benefits || {}) as Record<string, unknown>;
+
+    let coords: [number, number] | undefined = undefined;
+    if (Array.isArray(c.coordinates) && c.coordinates.length >= 2) {
+      const lat = Number(c.coordinates[0]);
+      const lng = Number(c.coordinates[1]);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        coords = [lat, lng];
+      }
+    }
+
+    const cand: Candidate = {
+      cellId,
+      areaName: String(c.areaName ?? c.area_name ?? cellId),
+      interventionId: intId,
+      interventionName: String(c.interventionName ?? c.intervention_name ?? 'Intervention'),
+      quantity: Number.isFinite(c.quantity) ? Number(c.quantity) : 1,
+      unit: String(c.unit ?? 'units'),
+      cost,
+      combinedBenefit: cBen,
+      benefitPerCost: bPerC,
+      categoryBenefit: {
+        heat: Number.isFinite(cCat.heat) ? Number(cCat.heat) : 0,
+        vegetation: Number.isFinite(cCat.vegetation)
+          ? Number(cCat.vegetation)
+          : Number.isFinite(cCat.greenery)
+          ? Number(cCat.greenery)
+          : 0,
+        pedestrian: Number.isFinite(cCat.pedestrian) ? Number(cCat.pedestrian) : 0,
+        connectivity: Number.isFinite(cCat.connectivity) ? Number(cCat.connectivity) : 0,
+      },
+      ...(typeof c.studyAreaId === 'string' ? { studyAreaId: c.studyAreaId } : studyAreaId ? { studyAreaId } : {}),
+      ...(typeof c.gridVersion === 'string' ? { gridVersion: c.gridVersion } : gridVersion ? { gridVersion } : {}),
+      ...(coords ? { coordinates: coords as [number, number] } : {}),
+    };
+    return cand;
+  });
+
+  const cellsImproved = Number.isFinite(r.cellsImproved)
+    ? Number(r.cellsImproved)
+    : Number.isFinite(r.cells_improved)
+    ? Number(r.cells_improved)
+    : new Set(selected.map((s) => s.cellId)).size;
+
+  const rawRejected = Array.isArray(r.rejected) ? r.rejected : [];
+  const rejected = rawRejected.map((item: unknown) => {
+    const rej = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+    const candRaw = rej.candidate && typeof rej.candidate === 'object' ? rej.candidate : {};
+    return {
+      candidate: candRaw as Candidate,
+      reason: String(rej.reason ?? 'Site feasibility or constraint boundary'),
+    };
+  });
+
+  const valRaw = (r.validation && typeof r.validation === 'object' ? r.validation : {}) as Record<string, unknown>;
+  const validation = {
+    valid: Boolean(valRaw.valid ?? true),
+    violations: Array.isArray(valRaw.violations) ? valRaw.violations.map(String) : [],
+  };
+
+  const planConfidence = Number.isFinite(r.planConfidence)
+    ? Number(r.planConfidence)
+    : Number.isFinite(r.plan_confidence)
+    ? Number(r.plan_confidence)
+    : 0.9;
+
+  const optResult: OptimizerResult = {
+    selected,
+    rejected,
+    totalCost,
+    remainingBudget,
+    utilization,
+    combinedBenefit,
+    categoryBenefits,
+    cellsImproved,
+    validation,
+    planConfidence,
+    ...(r.planMode === 'standard' || r.planMode === 'adaptive'
+      ? { planMode: r.planMode }
+      : r.plan_mode === 'standard' || r.plan_mode === 'adaptive'
+      ? { planMode: r.plan_mode }
+      : {}),
+    ...(typeof r.strategyName === 'string'
+      ? { strategyName: r.strategyName }
+      : typeof r.strategy_name === 'string'
+      ? { strategyName: r.strategy_name }
+      : {}),
+    ...(studyAreaId ? { studyAreaId } : {}),
+    ...(gridVersion ? { gridVersion } : {}),
+    ...(crs ? { crs } : {}),
+  };
+  return optResult;
+}
+
 export const api = {
   health: () => request<{ ok: boolean; service: string; provider: string }>('/api/health'),
   csrf: () => request<{ csrfToken: string }>('/api/auth/csrf'),
@@ -70,7 +261,10 @@ export const api = {
   cells: (studyId: string) => request<{ study: StudyArea; count: number; polygons: number; cells: Cell[] }>(`/api/studies/${encodeURIComponent(studyId)}/cells`),
   searchPlaces: (query: string) => request<{ results: PlaceResult[] }>(`/api/geocode/search?q=${encodeURIComponent(query)}`),
   connectivity: (studyId: string) => request<ConnectivityResult>(`/api/connectivity?studyId=${encodeURIComponent(studyId)}`),
-  optimize: (input: OptimizerInput & { studyId?: string }) => request<OptimizerResult>('/api/optimize', { method: 'POST', body: JSON.stringify(input) }),
+  optimize: async (input: OptimizerInput & { studyId?: string }): Promise<OptimizerResult> => {
+    const res = await request<OptimizerResult>('/api/optimize', { method: 'POST', body: JSON.stringify(input) });
+    return normalizeOptimizerResult(res, input.studyId);
+  },
   whatIf: (input: { studyId?: string; cellId: string; interventionId: InterventionId; quantity: number }) => request<WhatIfResult>('/api/whatif', { method: 'POST', body: JSON.stringify(input) }),
   register: (
     param1: string | { fullName: string; email: string; password: string; confirmPassword?: string },
@@ -185,6 +379,107 @@ export const api = {
     request<AIImpactSummaryResponse>('/api/ai/impact-summary', { method: 'POST', body: JSON.stringify(input) }),
   aiValidatePlan: (input: { studyId?: string; budget?: number; plan: unknown }) =>
     request<AIValidatePlanResponse>('/api/ai/validate-plan', { method: 'POST', body: JSON.stringify(input) }),
+
+  // Stage 8: Grok-Powered Terrain-Adaptive AI Decision Engine
+  adaptiveProfiles: () =>
+    request<AdaptiveProfilesResponse>('/api/adaptive/profiles'),
+  adaptiveCharacterize: (studyId: string) =>
+    request<TerrainProfile>('/api/adaptive/characterize', { method: 'POST', body: JSON.stringify({ study_id: studyId }) }),
+  adaptiveStrategy: (input: { studyId: string; budget?: number; userPriorities?: Record<string, number>; focusObjective?: string; forceFallback?: boolean }) =>
+    request<ValidatedStrategy>('/api/adaptive/strategy', {
+      method: 'POST',
+      body: JSON.stringify({
+        study_id: input.studyId,
+        budget: input.budget,
+        user_priorities: input.userPriorities,
+        focus_objective: input.focusObjective,
+        force_fallback: input.forceFallback,
+      }),
+    }),
+  adaptiveValidate: (input: { studyId: string; budget?: number; strategy: unknown }) =>
+    request<ValidatedStrategy>('/api/adaptive/validate', {
+      method: 'POST',
+      body: JSON.stringify({ study_id: input.studyId, budget: input.budget, strategy: input.strategy }),
+    }),
+  adaptiveOptimize: async (input: {
+    studyId: string;
+    budget?: number;
+    mode?: 'standard' | 'adaptive';
+    customStrategy?: unknown;
+    enabledInterventions?: readonly string[];
+    gridVersion?: string;
+    datasetVersion?: string;
+    currency?: string;
+    weights?: ScoreWeights;
+  }): Promise<AdaptiveOptimizeResponse> => {
+    const res = await request<AdaptiveOptimizeResponse>('/api/adaptive/optimize', {
+      method: 'POST',
+      body: JSON.stringify({
+        study_id: input.studyId,
+        studyId: input.studyId,
+        budget: input.budget,
+        mode: input.mode ?? 'adaptive',
+        custom_strategy: input.customStrategy,
+        customStrategy: input.customStrategy,
+        enabled_interventions: input.enabledInterventions,
+        enabledInterventions: input.enabledInterventions,
+        grid_version: input.gridVersion ?? '2.0',
+        gridVersion: input.gridVersion ?? '2.0',
+        dataset_version: input.datasetVersion ?? 'CALIBRATED_PUBLIC_DATA',
+        datasetVersion: input.datasetVersion ?? 'CALIBRATED_PUBLIC_DATA',
+        currency: input.currency ?? 'INR',
+        weights: input.weights,
+      }),
+    });
+    const normalizedPlan = normalizeOptimizerResult(res.plan, input.studyId);
+    const resolvedMode = res.mode ?? input.mode ?? 'adaptive';
+    const strategyObj = res.strategy as Record<string, unknown> | undefined;
+    const resolvedStrategyName =
+      typeof strategyObj?.strategy_name === 'string'
+        ? strategyObj.strategy_name
+        : resolvedMode === 'standard'
+        ? 'Standard Municipal Baseline'
+        : 'AI-Adaptive Optimization';
+    return {
+      ...res,
+      plan: {
+        ...normalizedPlan,
+        planMode: resolvedMode,
+        strategyName: resolvedStrategyName,
+      },
+    };
+  },
+  adaptiveCompare: async (input: {
+    studyId: string;
+    budget?: number;
+    enabledInterventions?: readonly string[];
+  }): Promise<AdaptiveComparisonResult> => {
+    const res = await request<AdaptiveComparisonResult>('/api/adaptive/compare', {
+      method: 'POST',
+      body: JSON.stringify({
+        study_id: input.studyId,
+        studyId: input.studyId,
+        budget: input.budget,
+        enabled_interventions: input.enabledInterventions,
+        enabledInterventions: input.enabledInterventions,
+      }),
+    });
+    const standardPlan = normalizeOptimizerResult(res.standard_plan, input.studyId);
+    const adaptivePlan = normalizeOptimizerResult(res.adaptive_plan, input.studyId);
+    return {
+      ...res,
+      standard_plan: {
+        ...standardPlan,
+        planMode: 'standard',
+        strategyName: 'Standard Municipal Baseline',
+      },
+      adaptive_plan: {
+        ...adaptivePlan,
+        planMode: 'adaptive',
+        strategyName: res.adaptive_strategy?.strategy_name ?? 'AI-Adaptive Strategy',
+      },
+    };
+  },
 };
 
 export type AIPoolStatus = {
@@ -297,5 +592,138 @@ export type AIValidatePlanResponse = {
     total_keys: number;
     failover_count: number;
   };
+};
+
+export type TerrainType =
+  | 'industrial'
+  | 'dense_urban'
+  | 'residential'
+  | 'commercial'
+  | 'mixed_use'
+  | 'green_belt'
+  | 'unknown';
+
+export type TerrainProfile = {
+  study_area_id: string;
+  study_area_name: string;
+  terrain_type: TerrainType;
+  confidence: number;
+  classification_reason: string;
+  natural_terrain: {
+    mean_built_surface_ratio: number;
+    mean_green_space_ratio: number;
+    mean_available_area_m2: number;
+    dominant_surface_type: string;
+    surface_distribution: Record<string, number>;
+    has_water_bodies: boolean;
+    has_steep_or_restricted_zones: boolean;
+  };
+  land_use_context: {
+    dominant_land_use: string;
+    land_use_distribution: Record<string, number>;
+    commercial_intensity: number;
+    industrial_intensity: number;
+    residential_intensity: number;
+    civic_or_heritage_intensity: number;
+  };
+  environmental_indicators: {
+    mean_heat_score: number;
+    mean_vegetation_deficit: number;
+    mean_pedestrian_exposure: number;
+    mean_connectivity_gap: number;
+    mean_tree_suitability: number;
+    mean_feasibility_score: number;
+    high_heat_cells_count: number;
+    high_exposure_cells_count: number;
+    statutory_restrictions_count: number;
+  };
+  detected_constraints: string[];
+  dataset_provenance: string;
+  grid_cells_evaluated: number;
+};
+
+export type ValidatedStrategy = {
+  strategy_id: string;
+  strategy_name: string;
+  strategy_version: string;
+  terrain_type: TerrainType;
+  formula_id: string;
+  priority_weights: {
+    heat: number;
+    vegetation: number;
+    pedestrian: number;
+    connectivity: number;
+  };
+  optimization_weights: {
+    w_heat: number;
+    w_biodiversity: number;
+    w_connectivity: number;
+    w_greenery: number;
+    w_pedestrian: number;
+  };
+  model_id: string;
+  model_version: string;
+  preferred_interventions: string[];
+  explanation: string;
+  validation_status: 'VALIDATED' | 'FALLBACK_APPLIED' | 'REJECTED';
+  fallback_applied: boolean;
+  fallback_reason?: string | null;
+  validation_errors: Array<{ field: string; code: string; message: string; invalid_value?: unknown }>;
+  checked_rules: string[];
+  parameter_hash: string;
+  timestamp: string;
+  provenance: string;
+};
+
+export type SharedEvaluationMetrics = {
+  thermal_mitigation_index: number;
+  canopy_deficit_closed: number;
+  pedestrian_comfort_benefit: number;
+  connectivity_improvement: number;
+  cost_efficiency_ratio: number;
+  total_interventions_count: number;
+  cells_improved_count: number;
+  budget_spent: number;
+  budget_headroom: number;
+};
+
+export type AdaptiveOptimizeResponse = {
+  mode: 'standard' | 'adaptive';
+  study_id: string;
+  terrain_profile: TerrainProfile;
+  plan: OptimizerResult;
+  strategy: ValidatedStrategy | Record<string, unknown>;
+  shared_metrics: SharedEvaluationMetrics;
+};
+
+export type AdaptiveComparisonResult = {
+  study_area_id: string;
+  study_area_name: string;
+  terrain_type: TerrainType;
+  budget: number;
+  standard_plan: OptimizerResult;
+  adaptive_plan: OptimizerResult;
+  standard_strategy: Record<string, unknown>;
+  adaptive_strategy: ValidatedStrategy;
+  standard_metrics: SharedEvaluationMetrics;
+  adaptive_metrics: SharedEvaluationMetrics;
+  delta: {
+    thermal_mitigation_delta_pct: number;
+    canopy_closed_delta_pct: number;
+    pedestrian_comfort_delta_pct: number;
+    cost_efficiency_delta_pct: number;
+    cells_improved_diff: number;
+    cost_diff_inr: number;
+  };
+  explanation: string;
+  fairness_disclaimer: string;
+};
+
+export type AdaptiveProfilesResponse = {
+  status: string;
+  supported_terrains: TerrainType[];
+  registered_formulas: Array<{ formula_id: string; name: string; description: string; version: string; required_parameters: string[] }>;
+  registered_models: Array<{ model_id: string; model_name: string; model_version: string; supported_terrains: string[] }>;
+  baseline_strategies: Record<string, unknown>;
 };
 

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity, ArrowRight, ArrowUpRight, ArrowUpRightFromSquare, BarChart3, Check, CheckCircle2, ChevronDown,
@@ -177,7 +177,16 @@ function AppFrame() {
   const activeMap = MAP_ROUTES.has(location.pathname);
   const avgPriority = useMemo(() => cells.reduce((sum, cell) => sum + combinedPriority(cell.scores), 0) / Math.max(1, cells.length), [cells]);
   const hotspots = useMemo(() => [...cells].sort((left, right) => combinedPriority(right.scores) - combinedPriority(left.scores)).slice(0, 5), [cells]);
-  const activePlan = useMemo(() => plan ?? optimizePlan(cells, { budget, weights, enabledInterventions: initialInterventions }), [cells, budget, plan, weights]);
+  const studyRequestIdRef = useRef(0);
+
+  const activePlan = useMemo(() => {
+    // If a plan is loaded for a different study area, invalidate and use active cells fallback
+    if (plan && plan.studyAreaId && plan.studyAreaId !== activeStudyId) {
+      return optimizePlan(cells, { budget, weights, enabledInterventions: initialInterventions });
+    }
+    return plan ?? optimizePlan(cells, { budget, weights, enabledInterventions: initialInterventions });
+  }, [activeStudyId, budget, cells, plan, weights]);
+
   const activeConnectivity = useMemo(() => analyzeConnectivity(cells, activePlan.selected.map((candidate) => candidate.cellId)), [activePlan, cells]);
   const updateScenarioComparison = useCallback((baseline: OptimizerResult, proposal: OptimizerResult) => { setScenarioComparison({ baseline, proposal }); }, []);
   const pageTitle = MAP_PAGE_TITLES[location.pathname];
@@ -206,14 +215,18 @@ function AppFrame() {
   }, [activeStudyId, budget, cells, pushToast, setLayer, setPlan, weights]);
 
   const openStudy = async (studyId: string) => {
+    const reqId = ++studyRequestIdRef.current;
     setStudyLoading(true);
+    // Invalidate stale plan and clear incompatible selection immediately
+    setPlan(null);
+    selectCell('', false);
+    setActiveStudyId(studyId);
+    setStudyMenuOpen(false);
+
     try {
       const response = await api.cells(studyId);
+      if (studyRequestIdRef.current !== reqId) return;
       setCells(response.cells);
-      setActiveStudyId(studyId);
-      setPlan(null);
-      selectCell('', false);
-      setStudyMenuOpen(false);
 
       // Trigger location-specific backend optimization
       try {
@@ -223,14 +236,16 @@ function AppFrame() {
           weights,
           enabledInterventions: initialInterventions,
         });
-        setPlan(optResult);
+        if (studyRequestIdRef.current === reqId) {
+          setPlan(optResult);
+        }
       } catch {
         // activePlan useMemo will compute local fallback with response.cells
       }
 
       pushToast(`Loaded ${response.study.name} · ${response.cells.length} cells.`, 'success');
 
-      // Center MapLibre map on new study area
+      // Center map on new study area
       const origin = response.study?.origin;
       if (origin && Array.isArray(origin) && origin.length === 2) {
         window.dispatchEvent(
@@ -240,9 +255,13 @@ function AppFrame() {
         );
       }
     } catch (error) {
-      pushToast(error instanceof Error ? error.message : 'Could not load this study area.', 'error');
+      if (studyRequestIdRef.current === reqId) {
+        pushToast(error instanceof Error ? error.message : 'Could not load this study area.', 'error');
+      }
     }
-    setStudyLoading(false);
+    if (studyRequestIdRef.current === reqId) {
+      setStudyLoading(false);
+    }
   };
 
   const handleExport = async (format: 'csv' | 'geojson') => {

@@ -23,10 +23,15 @@ export interface StudyArea {
   cellSizeLat: number;
   cellSizeLng: number;
   rotation: number;
+  gridVersion?: string;
+  crs?: string;
 }
 
 export interface Cell {
   id: string;
+  studyAreaId?: string;
+  gridVersion?: string;
+  crs?: string;
   row: number;
   col: number;
   center: LatLng;
@@ -92,6 +97,9 @@ export interface OptimizerInput {
 
 export interface Candidate {
   cellId: string;
+  studyAreaId?: string;
+  gridVersion?: string;
+  coordinates?: LatLng;
   areaName: string;
   interventionId: InterventionId;
   interventionName: string;
@@ -109,6 +117,9 @@ export interface RejectedCandidate {
 }
 
 export interface OptimizerResult {
+  studyAreaId?: string;
+  gridVersion?: string;
+  crs?: string;
   selected: readonly Candidate[];
   rejected: readonly RejectedCandidate[];
   totalCost: number;
@@ -120,6 +131,10 @@ export interface OptimizerResult {
   validation: { valid: boolean; violations: readonly string[] };
   /** Benefit-weighted mean data confidence (0-1) of the selected cells. */
   planConfidence?: number;
+  /** Optimization model provenance: standard municipal baseline vs AI-adaptive */
+  planMode?: 'standard' | 'adaptive';
+  /** Human-readable strategy name if generated or applied */
+  strategyName?: string;
 }
 
 export interface WhatIfResult {
