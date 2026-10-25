@@ -94,8 +94,8 @@ const PRESETS: ScenarioPreset[] = [
 interface ScenarioLabPageProps {
   cells: Cell[];
   studyId: string;
-  activeStudy?: (StudySummary & { dataLabel?: string }) | undefined;
-  studies: (StudySummary & { dataLabel?: string })[];
+  activeStudy?: StudySummary | undefined;
+  studies: StudySummary[];
   onSelectStudy: (studyId: string) => Promise<void>;
   onOptimize: () => Promise<void>;
 }

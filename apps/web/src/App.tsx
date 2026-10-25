@@ -20,6 +20,7 @@ import {
   AIValidationAssistant,
 } from './components/AIPlanningFeatures.js';
 import { CellInspector } from './components/CellInspector.js';
+import { StudyAreaPicker } from './components/StudyAreaPicker/StudyAreaPicker.js';
 
 const GridMap = lazy(() => import('./components/GridMap.js'));
 const ClimateCharts = lazy(() => import('./components/ClimateCharts.js'));
@@ -83,7 +84,6 @@ function AppFrame() {
   const [comparisonOpen, setComparisonOpen] = useState(false);
   const [searchValue, setSearchValue] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
-  const [studyMenuOpen, setStudyMenuOpen] = useState(false);
   const [studyLoading, setStudyLoading] = useState(false);
   const [pngExporting, setPngExporting] = useState(false);
   const [scenarioComparison, setScenarioComparison] = useState<{ baseline: OptimizerResult; proposal: OptimizerResult } | null>(null);
@@ -221,7 +221,6 @@ function AppFrame() {
     setPlan(null);
     selectCell('', false);
     setActiveStudyId(studyId);
-    setStudyMenuOpen(false);
 
     try {
       const response = await api.cells(studyId);
@@ -337,52 +336,13 @@ function AppFrame() {
     <aside className="sidebar" aria-label="Primary navigation">
       <Link className="brand" to="/overview" onClick={() => setSidebarOpen(false)}><BrandMark /><span><b>eco<span>grid</span></b><small>CLIMATE INTELLIGENCE</small></span><span className="brand-version">2.0</span></Link>
       <div className="study-picker-wrap">
-        <button className="study-selector" type="button" aria-expanded={studyMenuOpen} disabled={studyLoading} onClick={() => setStudyMenuOpen((open) => !open)}>
-          <span className="study-avatar">{(activeStudy?.name ?? 'B').slice(0, 1).toUpperCase()}</span>
-          <span className="study-name">
-            <b>{activeStudy?.name ?? 'Bengaluru East'}</b>
-            <small>{activeStudy ? `${activeStudy.rows} × ${activeStudy.columns} cells` : 'Study area'} <i>·</i> {studyLoading ? 'Loading' : 'Active'}</small>
-          </span>
-          <ChevronDown size={15} />
-        </button>
-        {studyMenuOpen && (
-          <div className="study-menu" role="menu" aria-label="Choose study area">
-            {studies.map((study) => (
-              <button key={study.id} type="button" role="menuitemradio" aria-checked={study.id === activeStudyId} onClick={() => void openStudy(study.id)}>
-                <b>{study.name}</b>
-                <small>{study.rows} × {study.columns} · {study.cellCount} cells</small>
-              </button>
-            ))}
-            <button
-              type="button"
-              style={{
-                marginTop: '6px',
-                borderTop: '1px solid rgba(255,255,255,0.1)',
-                color: '#4CC38A',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '9px 12px',
-                fontSize: '11px',
-                width: '100%',
-                background: 'rgba(76, 195, 138, 0.06)',
-                borderLeft: 'none',
-                borderRight: 'none',
-                borderBottom: 'none',
-                cursor: 'pointer',
-                textAlign: 'left',
-                borderRadius: '0 0 6px 6px',
-              }}
-              onClick={() => {
-                setStudyMenuOpen(false);
-                navigate('/data-sources');
-              }}
-            >
-              <FilePlus2 size={13} />
-              <b>+ Change / search new location…</b>
-            </button>
-          </div>
-        )}
+        <StudyAreaPicker
+          studies={studies}
+          activeStudyId={activeStudyId}
+          onSelectStudy={openStudy}
+          isLoading={studyLoading}
+          onNavigateNewLocation={() => navigate('/data-sources')}
+        />
       </div>
 
       <div className="nav-scroll">{navSections.map((section) => <div className="nav-group" key={section.group}><div className="nav-group-title">{section.group}</div>{section.items.map((item) => <NavLink key={item.to} to={item.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} aria-current={location.pathname === item.to ? 'page' : undefined}><item.icon size={16} strokeWidth={1.7} /><span>{item.label}</span>{'badge' in item && <small className="nav-live">{item.badge}</small>}{item.to === '/environment' && <span className="nav-count">{cells.length}</span>}</NavLink>)}</div>)}</div>

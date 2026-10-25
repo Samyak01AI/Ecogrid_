@@ -3,7 +3,12 @@ import type { Cell, LayerKey, OptimizerResult, ScoreWeights, StudyArea } from '@
 import type { UserSession } from './api.js';
 
 export type Toast = { id: number; message: string; kind: 'success' | 'error' | 'info' };
-export type StudySummary = StudyArea & { cellCount: number };
+export type StudySummary = StudyArea & {
+  cellCount: number;
+  dataLabel?: string | undefined;
+  data_label?: string | undefined;
+  isPublic?: boolean | undefined;
+};
 export type Store = {
   cells: Cell[];
   studies: StudySummary[];
